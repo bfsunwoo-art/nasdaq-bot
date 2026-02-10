@@ -1,3 +1,21 @@
+import sys
+from types import ModuleType
+
+# urllib3 버전 충돌 에러 강제 해결 (긴급 수술)
+try:
+    import urllib3.packages.six.moves.http_client
+except ImportError:
+    import http.client
+    mock_six = ModuleType('six')
+    mock_six.moves = ModuleType('moves')
+    mock_six.moves.http_client = http.client
+    sys.modules['urllib3.packages.six'] = mock_six
+    sys.modules['urllib3.packages.six.moves'] = mock_six.moves
+    sys.modules['urllib3.packages.six.moves.http_client'] = http.client
+
+import yfinance as yf
+import pandas as pd
+# ... (이후 기존 코드 계속)
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
