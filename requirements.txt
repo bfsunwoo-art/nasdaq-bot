@@ -1,6 +1,5 @@
 yfinance
-pandas
-pandas_ta
+pandas-ta
 requests
-flask
-alpaca-trade-api
+alpaca-trade-api==3.2.0
+urllib3<2.0.0
