@@ -113,23 +113,32 @@ def buy_order_direct(ticker, price, rsi):
 # ------------------------------------------
 # 시작 알림
 requests.post(NTFY_URL, data="🤖 성민0106님, '폭풍의 눈' 감시 봇이 가동되었습니다!".encode('utf-8'))
+print("🚀 봇 가동 시퀀스 시작...")
+
 try:
-    requests.post("https://ntfy.sh/sungmin_ssk_7", data="[테스트] 봇이 지금 살아있습니다!".encode('utf-8'), timeout=10)
-    print("✅ 테스트 알림 전송 시도됨")
+    # 가동 즉시 알람 테스트
+    test_res = requests.post("https://ntfy.sh/sungmin_ssk_7", 
+                             data="🤖 성민0106님, 봇이 완벽하게 가동되었습니다!".encode('utf-8'), 
+                             timeout=10)
+    print(f"✅ ntfy 테스트 결과: {test_res.status_code}") # 로그에 200이 뜨면 성공
 except Exception as e:
-    print(f"❌ 알림 전송 실패: {e}")
+    print(f"❌ ntfy 알림 전송 에러: {e}")
+
 while True:
-    now_time = datetime.now().strftime('%H:%M:%S')
-    print(f"⏰ {now_time} 전 종목 분석 시작...")
+    now = datetime.now().strftime('%H:%M:%S')
+    print(f"⏰ {now} 분석 시작...")
     
+    # 분석 중임을 알리기 위해 1시간마다 한 번씩 생존 보고 (선택 사항)
+    # requests.post("https://ntfy.sh/sungmin_ssk_7", data=f"🛰️ 봇 정상 작동 중 ({now})".encode('utf-8'))
+
     for ticker in tickers:
-        signal = get_signal(ticker)
-        if signal:
-            price, rsi = signal
+        result = get_signal(ticker)
+        if result:
+            price, rsi = result
             buy_order_direct(ticker, price, rsi)
-            time.sleep(0.5) # API 호출 제한 방지
+            time.sleep(0.5)
             
-    print(f"✨ 스캔 완료. 5분 후 다시 시작합니다.")
-    time.sleep(300) # 5분 간격 스캔 (골든크로스를 놓치지 않기 위해 단축)
+    print(f"✨ {now} 스캔 완료. 5분 대기...")
+    time.sleep(300)
 
         
