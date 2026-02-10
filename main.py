@@ -3,28 +3,28 @@ import pandas as pd
 import pandas_ta as ta
 import requests
 import time
-from flask import Flask
-from threading import Thread
+from datetime import datetime
+import alpaca_trade_api as tradeapi
 
-app = Flask('')
+# ==========================================
+# 1. 설정 (이 부분을 성민님 정보로 수정하세요)
+# ==========================================
+ALPACA_API_KEY = 'PKDAL2Z52D5YTI2V7N2TR2UXGO'
+ALPACA_SECRET_KEY = '7odPStsrP7u931DN34UYsaYH1mJsUYZSo399uK3oHpHt'
+ALPACA_BASE_URL = 'https://paper-api.alpaca.markets' # 모의투자용 주소
 
-@app.route('/')
-def home(): return "성민0106 v4.0 트레이더 봇 가동중"
+NTFY_URL = "https://ntfy.sh/sungmin_nasdaq_bot" # 성민님의 ntfy 주소
 
-def keep_alive():
-    t = Thread(target=lambda: app.run(host='0.0.0.0', port=8080))
-    t.daemon = True
-    t.start()
+# 매매 설정
+INVEST_AMOUNT = 100  # 한 종목당 투자할 금액 ($100)
+TAKE_PROFIT = 0.03   # 익절 라인 (3%)
+STOP_LOSS = 0.02     # 손절 라인 (2%)
 
-NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
+# Alpaca API 연결
+api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL, api_version='v2')
 
-def send_ntfy(message):
-    try: requests.post(NTFY_URL, data=message.encode('utf-8'), timeout=15)
-    except: pass
-
-# --- [시총 1000억 미만 소형주/바이오 리스트] ---
-WATCH_LIST = [
-    "TTOO", "GWAV", "LUNR", "BBAI", "SOUN", "GNS", "TCBP", "MGIH", "WISA", "IMPP", 
+# 나스닥 100 + 주요 종목 리스트 (예시로 10개만 넣었으나 기존 리스트 그대로 쓰셔도 됩니다)
+tickers =  ["TTOO", "GWAV", "LUNR", "BBAI", "SOUN", "GNS", "TCBP", "MGIH", "WISA", "IMPP", 
     "GRI", "MRAI", "XFOR", "TENX", "MGRM", "NVOS", "CDIO", "ICU", "MTC", "BDRX", 
     "ABVC", "PHUN", "AEMD", "AKAN", "ASNS", "CXAI", "CYTO", "HOLO", "ICG", "IKT",
     "BNRG", "AITX", "BCEL", "BNGO", "VRAX", "ADTX", "APDN", "TRVN", "CRBP", "KNSA",
@@ -34,93 +34,71 @@ WATCH_LIST = [
     "KMPH", "MBRX", "MTCR", "MYNZ", "NMTC", "ONDS", "OPCH", "OTIC", "PLIN", "PLXP",
     "PRPO", "QUIK", "RBBN", "SINT", "SNPX", "SQNS", "SYBX", "THMO", "TLSA", "VBLT",
     "VIVE", "VTGN", "WATT", "XERS", "ZVSA", "AQST", "ARQT", "ASRT",
-    "BCRX", "BTX", "CHRS", "CTIC", "EVFM", "GEVO", "GNLN", "IDRA", "LPCN"
-]
+    "BCRX", "BTX", "CHRS", "CTIC", "EVFM", "GEVO", "GNLN", "IDRA", "LPCN" ]
 
-def get_nasdaq_status():
-    """나스닥 지수 흐름 파악 (시장 리스크 체크)"""
+def get_signal(ticker):
     try:
-        ndq = yf.Ticker("^IXIC")
-        hist = ndq.history(period="2d")
-        change = ((hist['Close'].iloc[-1] - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100
-        return round(change, 2)
-    except: return 0
+        df = yf.download(ticker, period="1d", interval="5m", progress=False)
+        if len(df) < 20: return None
+        
+        # 지표 계산 (RSI, EMA)
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        df['EMA20'] = ta.ema(df['Close'], length=20)
+        
+        last_row = df.iloc[-1]
+        prev_row = df.iloc[-2]
+        current_price = last_row['Close']
 
-def scan_integrated_system():
-    MAX_MARKET_CAP = 75000000 # 약 1000억
-    nasdaq_change = get_nasdaq_status()
+        # 매수 조건: RSI 30 이하에서 탈출 + EMA20 돌파 시도 등 (성민님 기존 로직 유지 가능)
+        if prev_row['RSI'] < 35 and last_row['RSI'] >= 35:
+            return round(float(current_price), 2)
+    except:
+        return None
+
+def buy_order(ticker, price):
+    try:
+        # 1. 수량 계산 (금액 / 현재가)
+        qty = max(1, int(INVEST_AMOUNT / price))
+        
+        # 2. 익절/손절가 계산
+        tp_price = round(price * (1 + TAKE_PROFIT), 2)
+        sl_price = round(price * (1 - STOP_LOSS), 2)
+
+        # 3. 브래킷 주문 (매수 + 익절예약 + 손절예약) 전송
+        api.submit_order(
+            symbol=ticker,
+            qty=qty,
+            side='buy',
+            type='market',
+            time_in_force='gtc',
+            order_class='bracket',
+            take_profit={'limit_price': tp_price},
+            stop_loss={'stop_price': sl_price}
+        )
+        
+        msg = f"🚀 [매수완료] {ticker}\n수량: {qty}주 / 가격: ${price}\n🎯 익절가: ${tp_price}\n🛑 손절가: ${sl_price}"
+        print(msg)
+        requests.post(NTFY_URL, data=msg.encode('utf-8'))
+        
+    except Exception as e:
+        error_msg = f"❌ [주문실패] {ticker}: {e}"
+        print(error_msg)
+        requests.post(NTFY_URL, data=error_msg.encode('utf-8'))
+
+# 메인 루프
+print("🤖 성민0106님의 자동매매 봇 가동 시작...")
+while True:
+    now = datetime.now()
+    # 미국 시장 시간 확인 (22:30 ~ 05:00 KST 등 설정 가능)
+    print(f"⏰ 현재 시간: {now.strftime('%H:%M:%S')} - 종목 스캔 중...")
     
-    print(f"\n🔎 [v4.0] 지수 현황: {nasdaq_change}% | 분석 시작...", flush=True)
-    
-    for ticker in WATCH_LIST:
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            market_cap = info.get('marketCap', 0)
+    for ticker in tickers:
+        entry_price = get_signal(ticker)
+        if entry_price:
+            buy_order(ticker, entry_price)
+            time.sleep(1) # 주문 간격
             
-            if market_cap == 0 or market_cap > MAX_MARKET_CAP: continue
-
-            df = stock.history(period="60d") # 지표 계산을 위해 60일 데이터
-            if len(df) < 30: continue
-
-            # 1. RSI 계산 (광기 판별기)
-            df['RSI'] = ta.rsi(df['Close'], length=14)
-            current_rsi = round(df['RSI'].iloc[-1], 1)
-
-            # 2. 거래량 및 변동성 (폭풍의 눈 조건)
-            avg_vol_20 = df['Volume'].iloc[-21:-1].mean()
-            max_vol_3d = df['Volume'].iloc[-3:].max()
-            high_20 = df['High'].iloc[-20:].max()
-            low_20 = df['Low'].iloc[-20:].min()
-            volatility = (high_20 - low_20) / low_20
-            current_price = df['Close'].iloc[-1]
-
-            # 3. 매물대 체크 (최근 40일 최고점 돌파 여부)
-            is_breakout = current_price >= df['High'].iloc[-40:-1].max()
-
-            # --- 포착 로직 ---
-            is_volume_spike = (avg_vol_20 > 0) and (max_vol_3d >= (avg_vol_20 * 2.0))
-            is_sideways = volatility <= 0.25
-            
-            # 1. NaN 데이터 및 필수 조건 검사 (가장 중요!)
-            if pd.isna(current_rsi) or avg_vol_20 <= 0:
-                continue
-            
-            if is_volume_spike and is_sideways:
-                # RSI에 따른 상태 진단
-                if current_rsi >= 80: rsi_status = "⚠️ 광기(설거지주의)"
-                elif current_rsi >= 60: rsi_status = "🔥 상승탄력"
-                else: rsi_status = "✅ 초기진입유리"
-
-                # 지수 상황에 따른 멘트
-                market_msg = "🟢 장세양호" if nasdaq_change > -1 else "🔴 지수급락주의"
-
-                entry_price = round(current_price, 3)
-                target_price = round(entry_price * 1.20, 3)
-                stop_loss = round(entry_price * 0.90, 3)
-
-                msg = (f"🌪️ [v4.0 폭풍의눈 포착!]\n"
-                       f"종목: {ticker} (${round(market_cap/1000000, 1)}M)\n"
-                       f"상태: {rsi_status} | {market_msg}\n"
-                       f"------------------\n"
-                       f"🚩 진입: {entry_price}\n"
-                       f"🎯 목표: {target_price} (+20%)\n"
-                       f"🛡️ 손절: {stop_loss} (-10%)\n"
-                       f"------------------\n"
-                       f"📊 RSI: {current_rsi} | 돌파: {'YES' if is_breakout else 'NO'}\n"
-                       f"📈 거래: {round(max_vol_3d/avg_vol_20, 1)}배 | 변동: {round(volatility*100, 1)}%")
-
-                send_ntfy(msg)
-                print(f"✅ 포착: {ticker} (RSI: {current_rsi})", flush=True)
-
-        except: continue
-    print("✨ 스캔 완료. 30분 후 재시작.", flush=True)
-
-if __name__ == "__main__":
-    keep_alive()
-    while True:
-        scan_integrated_system()
-        time.sleep(1800)
+    time.sleep(300) # 5분마다 반복
 
 
 
