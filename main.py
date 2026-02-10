@@ -79,8 +79,12 @@ def scan_integrated_system():
             is_breakout = current_price >= df['High'].iloc[-40:-1].max()
 
             # --- 포착 로직 ---
-            is_volume_spike = max_vol_3d >= (avg_vol_20 * 2.0)
+            is_volume_spike = (avg_vol_20 > 0) and (max_vol_3d >= (avg_vol_20 * 2.0))
             is_sideways = volatility <= 0.25
+            
+            # 1. NaN 데이터 및 필수 조건 검사 (가장 중요!)
+            if pd.isna(current_rsi) or avg_vol_20 <= 0:
+                continue
             
             if is_volume_spike and is_sideways:
                 # RSI에 따른 상태 진단
