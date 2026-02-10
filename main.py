@@ -8,14 +8,13 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==========================================
-# 1. 설정 (성민님 정보 - 정확히 입력하세요!)
+# 1. 설정 (성민님 정보)
 # ==========================================
 ALPACA_API_KEY = 'PKDAL2Z52D5YTI2V7N2TR2UXGO'
 ALPACA_SECRET_KEY = '7odPStsrP7u931DN34UYsaYH1mJsUYZSo399uK3oHpHt'
 ALPACA_BASE_URL = 'https://paper-api.alpaca.markets'
 NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
 
-# 성민님의 '폭풍의 눈' 감시 종목 리스트
 tickers = [
     "TTOO", "GWAV", "LUNR", "BBAI", "SOUN", "GNS", "TCBP", "MGIH", "WISA", "IMPP", 
     "GRI", "MRAI", "XFOR", "TENX", "MGRM", "NVOS", "CDIO", "ICU", "MTC", "BDRX", 
@@ -31,7 +30,17 @@ tickers = [
 ]
 
 # ------------------------------------------
-# Render 배포 에러 방지용 가짜 서버 (로그 청소 버전)
+# [보호막 1] 알람 전송 함수 (에러가 나도 봇이 죽지 않음)
+# ------------------------------------------
+def send_ntfy(message):
+    try:
+        requests.post(NTFY_URL, data=message.encode('utf-8'), timeout=10)
+    except Exception as e:
+        # 알람 전송에 실패해도 로그만 남기고 프로그램은 계속 진행합니다.
+        print(f"⚠️ 알람 전송 실패 (무시하고 계속): {e}")
+
+# ------------------------------------------
+# Render 배포 에러 방지용 가짜 서버
 # ------------------------------------------
 def run_dummy_server():
     class Handler(BaseHTTPRequestHandler):
@@ -42,7 +51,7 @@ def run_dummy_server():
         def do_HEAD(self):
             self.send_response(200)
             self.end_headers()
-        def log_message(self, format, *args): return # 지저분한 501 에러 숨김
+        def log_message(self, format, *args): return 
     
     server = HTTPServer(('0.0.0.0', 10000), Handler)
     server.serve_forever()
@@ -50,23 +59,19 @@ def run_dummy_server():
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
 # ------------------------------------------
-# 매매 로직: 성민님의 RSI 35 골든크로스 전략
+# 매매 로직: RSI 35 골든크로스
 # ------------------------------------------
 def get_signal(ticker):
     try:
-        # 최근 데이터를 가져옴 (최소 20개 이상의 봉 필요)
         df = yf.download(ticker, period="1d", interval="5m", progress=False, show_errors=False)
         if df.empty or len(df) < 20: return None
         
-        # RSI 지표 계산 (기간 14)
         df['RSI'] = ta.rsi(df['Close'], length=14)
-        
-        # 이전 봉과 현재 봉의 RSI 값 추출
         prev_rsi = float(df['RSI'].iloc[-2])
         curr_rsi = float(df['RSI'].iloc[-1])
         curr_price = float(df['Close'].iloc[-1])
         
-        # [성민님 핵심 조건]: RSI가 35 미만에서 35 이상으로 뚫고 올라갈 때!
+        # 성민님 핵심 조건: 35 돌파
         if prev_rsi < 35 and curr_rsi >= 35:
             return round(curr_price, 2), curr_rsi
     except:
@@ -81,18 +86,13 @@ def buy_order_direct(ticker, price, rsi):
         "Content-Type": "application/json"
     }
     
-    # 설정: 한 종목당 $100 투자 / 익절 5% / 손절 3%
     qty = max(1, int(100 / price))
     take_profit = round(price * 1.05, 2)
     stop_loss = round(price * 0.97, 2)
 
     data = {
-        "symbol": ticker,
-        "qty": str(qty),
-        "side": "buy",
-        "type": "market",
-        "time_in_force": "gtc",
-        "order_class": "bracket",
+        "symbol": ticker, "qty": str(qty), "side": "buy", "type": "market",
+        "time_in_force": "gtc", "order_class": "bracket",
         "take_profit": {"limit_price": str(take_profit)},
         "stop_loss": {"stop_price": str(stop_loss)}
     }
@@ -101,44 +101,32 @@ def buy_order_direct(ticker, price, rsi):
         res = requests.post(url, json=data, headers=headers)
         status = "✅ 주문성공" if res.status_code == 200 else f"❌ 주문실패({res.status_code})"
         
-        # ntfy 알림 전송
         msg = f"🔎 [포착] {ticker}\n가 격: ${price}\nRSI: {rsi:.1f}\n결 과: {status}"
-        requests.post(NTFY_URL, data=msg.encode('utf-8'))
+        send_ntfy(msg) # 보호막이 있는 알람 함수 사용
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
     except Exception as e:
         print(f"주문 에러: {e}")
 
 # ------------------------------------------
-# 메인 루프 (무한 반복)
+# 메인 루프 (보호막 적용)
 # ------------------------------------------
-# 시작 알림
-requests.post(NTFY_URL, data="🤖 성민0106님, '폭풍의 눈' 감시 봇이 가동되었습니다!".encode('utf-8'))
-print("🚀 봇 가동 시퀀스 시작...")
-
-try:
-    # 가동 즉시 알람 테스트
-    test_res = requests.post("https://ntfy.sh/sungmin_ssk_7", 
-                             data="🤖 성민0106님, 봇이 완벽하게 가동되었습니다!".encode('utf-8'), 
-                             timeout=10)
-    print(f"✅ ntfy 테스트 결과: {test_res.status_code}") # 로그에 200이 뜨면 성공
-except Exception as e:
-    print(f"❌ ntfy 알림 전송 에러: {e}")
-
-while True:
-    now = datetime.now().strftime('%H:%M:%S')
-    print(f"⏰ {now} 분석 시작...")
+if __name__ == "__main__":
+    print("🚀 봇 가동 시퀀스 시작...")
     
-    # 분석 중임을 알리기 위해 1시간마다 한 번씩 생존 보고 (선택 사항)
-    # requests.post("https://ntfy.sh/sungmin_ssk_7", data=f"🛰️ 봇 정상 작동 중 ({now})".encode('utf-8'))
+    # 가동 알림 시도 (실패해도 무관함)
+    send_ntfy("🤖 성민0106님, '폭풍의 눈' 감시 봇이 안전하게 재가동되었습니다!")
 
-    for ticker in tickers:
-        result = get_signal(ticker)
-        if result:
-            price, rsi = result
-            buy_order_direct(ticker, price, rsi)
-            time.sleep(0.5)
-            
-    print(f"✨ {now} 스캔 완료. 5분 대기...")
-    time.sleep(300)
-
+    while True:
+        now = datetime.now().strftime('%H:%M:%S')
+        print(f"⏰ {now} 분석 시작...")
+        
+        for ticker in tickers:
+            result = get_signal(ticker)
+            if result:
+                price, rsi = result
+                buy_order_direct(ticker, price, rsi)
+                time.sleep(0.5)
+                
+        print(f"✨ {now} 스캔 완료. 5분 대기...")
+        time.sleep(300)
         
