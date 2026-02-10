@@ -113,7 +113,11 @@ def buy_order_direct(ticker, price, rsi):
 # ------------------------------------------
 # 시작 알림
 requests.post(NTFY_URL, data="🤖 성민0106님, '폭풍의 눈' 감시 봇이 가동되었습니다!".encode('utf-8'))
-
+try:
+    requests.post("https://ntfy.sh/sungmin_ssk_7", data="[테스트] 봇이 지금 살아있습니다!".encode('utf-8'), timeout=10)
+    print("✅ 테스트 알림 전송 시도됨")
+except Exception as e:
+    print(f"❌ 알림 전송 실패: {e}")
 while True:
     now_time = datetime.now().strftime('%H:%M:%S')
     print(f"⏰ {now_time} 전 종목 분석 시작...")
