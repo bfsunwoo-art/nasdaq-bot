@@ -13,7 +13,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 ALPACA_API_KEY = 'PKDAL2Z52D5YTI2V7N2TR2UXGO'
 ALPACA_SECRET_KEY = '7odPStsrP7u931DN34UYsaYH1mJsUYZSo399uK3oHpHt'
 ALPACA_BASE_URL = 'https://paper-api.alpaca.markets'
-NTFY_URL = "https://ntfy.sh/sungmin_nasdaq_bot"
+NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
 
 # 성민님의 '폭풍의 눈' 감시 종목 리스트
 tickers = [
