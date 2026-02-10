@@ -29,12 +29,12 @@ WATCH_LIST = [
     "ABVC", "PHUN", "AEMD", "AKAN", "ASNS", "CXAI", "CYTO", "HOLO", "ICG", "IKT",
     "BNRG", "AITX", "BCEL", "BNGO", "VRAX", "ADTX", "APDN", "TRVN", "CRBP", "KNSA",
     "SCYX", "OPGN", "TNXP", "AGEN", "SELB", "XCUR", "CLRB", "ATOS", "MBOT", "VYNE",
-    "ADXS", "APTO", "ARAV", "AVDL", "AXDX", "BCLI", "BIOL", "BSGM", "CASI", "CLSD",
-    "CTXR", "DRRX", "DYAI", "EBON", "ECOR", "EYEN", "GNPX", "HTGM", "IDRA", "KERN",
+    "ADXS", "APTO", "ARAV", "AVDL", "BCLI", "CASI", "CLSD",
+    "CTXR", "DRRX", "DYAI", "EBON", "ECOR", "GNPX", "HTGM", "IDRA", "KERN",
     "KMPH", "MBRX", "MTCR", "MYNZ", "NMTC", "ONDS", "OPCH", "OTIC", "PLIN", "PLXP",
     "PRPO", "QUIK", "RBBN", "SINT", "SNPX", "SQNS", "SYBX", "THMO", "TLSA", "VBLT",
-    "VIVE", "VTGN", "WATT", "XERS", "ZOM", "ZVSA", "AALX", "AQST", "ARQT", "ASRT",
-    "BCRX", "BTX", "CHRS", "CTIC", "EVFM", "GEVO", "GNLN", "IDEX", "IDRA", "LPCN"
+    "VIVE", "VTGN", "WATT", "XERS", "ZVSA", "AQST", "ARQT", "ASRT",
+    "BCRX", "BTX", "CHRS", "CTIC", "EVFM", "GEVO", "GNLN", "IDRA", "LPCN"
 ]
 
 def get_nasdaq_status():
