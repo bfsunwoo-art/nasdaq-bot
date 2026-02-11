@@ -1,6 +1,5 @@
 import sys
 import functools
-# [강력 처방] 로그 실시간 출력 설정
 print = functools.partial(print, flush=True)
 
 import yfinance as yf
@@ -9,13 +8,14 @@ import pandas_ta as ta
 import requests
 import time
 from datetime import datetime
+import pytz  # 시간대 설정을 위한 라이브러리 추가
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==========================================
-# 1. 설정 (새로 만드신 독립 계정 키를 꼭 확인하세요!)
+# 1. 설정 (성민0106님의 새 독립 계정 키 적용)
 # ==========================================
-ALPACA_API_KEY = 'PKHQEN22KBWB2HSXRGMPWQ3QYL' # <- 새 계정 키로 확인 완료
+ALPACA_API_KEY = 'PKHQEN22KBWB2HSXRGMPWQ3QYL'
 ALPACA_SECRET_KEY = 'ASJRBNmkBzRe18oRinn2GBQMxgqmGLh4CBbBd99HB14i'
 ALPACA_BASE_URL = 'https://paper-api.alpaca.markets'
 NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
@@ -52,35 +52,19 @@ def send_ntfy(message):
     except:
         pass
 
-# ------------------------------------------
-# 매매 로직: RSI 35 + VWAP + Volume 필터 (프리마켓 대응)
-# ------------------------------------------
 def get_signal(ticker):
     try:
-        # include_prepost=True로 프리마켓 데이터까지 수집
         df = yf.download(ticker, period="1d", interval="5m", progress=False, show_errors=False, timeout=10, include_prepost=True)
         if df.empty or len(df) < 20: return None
-        
-        # 1. RSI 계산
         df['RSI'] = ta.rsi(df['Close'], length=14)
-        
-        # 2. VWAP 계산 (수동 계산 또는 pandas_ta 활용)
-        # VWAP = 합계(가격 * 거래량) / 합계(거래량)
         df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
-        
         curr_price = float(df['Close'].iloc[-1])
         prev_rsi = float(df['RSI'].iloc[-2])
         curr_rsi = float(df['RSI'].iloc[-1])
         curr_vwap = float(df['VWAP'].iloc[-1])
-        
-        # 거래량 필터: 최근 5개 봉(25분) 평균 거래량 대비 1.5배 터졌는지 확인
         avg_vol = df['Volume'].iloc[-6:-1].mean()
         curr_vol = df['Volume'].iloc[-1]
         
-        # [최종 조건]
-        # 1. RSI 35 골든크로스 (바닥 탈출)
-        # 2. 현재가가 VWAP보다 위 (상승 추세)
-        # 3. 거래량이 평균보다 1.5배 이상 (수급 확인)
         if prev_rsi < 35 and curr_rsi >= 35:
             if curr_price > curr_vwap and curr_vol > (avg_vol * 1.5):
                 return round(curr_price, 2), curr_rsi
@@ -101,25 +85,22 @@ def buy_order_direct(ticker, price, rsi):
     try:
         res = requests.post(url, json=data, headers=headers, timeout=10)
         status = "성공" if res.status_code == 200 else f"실패({res.status_code})"
-        msg = f"🚀 [프리마켓/본장 포착] {ticker}\n가격: ${price}\nRSI: {rsi:.1f}\n결과: {status}"
+        msg = f"🚀 [sm2 포착] {ticker}\n가격: ${price}\nRSI: {rsi:.1f}\n결과: {status}"
         send_ntfy(msg)
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+        print(f"[{datetime.now(pytz.timezone('Asia/Seoul')).strftime('%H:%M:%S')}] {msg}")
     except:
         print(f"❌ {ticker} 주문 중 에러")
 
-# ------------------------------------------
-# 메인 스케줄러 (한국 시간 기준)
-# ------------------------------------------
 if __name__ == "__main__":
-    print("🚀 봇 통합 가동 시퀀스 시작 (PM 18:00 - AM 06:00)")
-    send_ntfy("🚨 [시즌 2] 성민님, 프리마켓+본장 통합 봇이 가동되었습니다!")
+    KST = pytz.timezone('Asia/Seoul')
+    print("🚀 sm2 가동 (한국 시간 기준 18:00 - 06:00)")
+    send_ntfy("🚨 [sm2] 성민님, 한국 시간 고정 버전이 배포되었습니다!")
 
     while True:
-        now = datetime.now()
-        # 한국 시간 기준: 18시(오후 6시)부터 다음날 아침 06시까지 작동
+        now = datetime.now(KST)
         if now.hour >= 18 or now.hour < 6:
             now_str = now.strftime('%H:%M:%S')
-            print(f"⏰ {now_str} - 102개 종목 통합 스캔 시작...")
+            print(f"⏰ {now_str} - 102개 종목 스캔 시작...")
             for ticker in tickers:
                 signal = get_signal(ticker)
                 if signal:
@@ -128,6 +109,5 @@ if __name__ == "__main__":
             print(f"✨ {now_str} - 사이클 완료. 5분 대기.")
             time.sleep(300)
         else:
-            # 낮 시간엔 1시간마다 체크하며 대기
-            print(f"💤 현재 시간 {now.hour}시, 시장 휴식기입니다. 1시간 뒤 확인.")
+            print(f"💤 현재 한국 시간 {now.hour}시, 시장 휴식기입니다.")
             time.sleep(3600)
