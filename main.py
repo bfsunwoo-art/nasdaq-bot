@@ -15,8 +15,8 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 # ==========================================
 # 1. 설정 (성민님 정보 - 정확히 입력됨)
 # ==========================================
-ALPACA_API_KEY = 'PKDAL2Z52D5YTI2V7N2TR2UXGO'
-ALPACA_SECRET_KEY = '7odPStsrP7u931DN34UYsaYH1mJsUYZSo399uK3oHpHt'
+ALPACA_API_KEY = 'PKI4EKE6RY5VHXH7EM4VCP6TKG'
+ALPACA_SECRET_KEY = '43YAJLe5CTQVE6pwHat6oDw3npughyRnCja1gsFX2eM3'
 ALPACA_BASE_URL = 'https://paper-api.alpaca.markets'
 NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
 
