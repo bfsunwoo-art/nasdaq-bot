@@ -10,18 +10,19 @@ import time
 from datetime import datetime
 import pytz
 import threading
+import random
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ==========================================
-# 1. 설정 (성민0106님 API 키 및 ntfy 주소)
+# 1. 설정 (성민0106님 정보)
 # ==========================================
 ALPACA_API_KEY = 'PKHQEN22KBWB2HSXRGMPWQ3QYL'
 ALPACA_SECRET_KEY = 'ASJRBNmkBzRe18oRinn2GBQMxgqmGLh4CBbBd99HB14i'
 ALPACA_BASE_URL = 'https://paper-api.alpaca.markets'
 NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
 
-# 검증 완료된 402개 종목 리스트
-tickers = [
+# 성민0106 고정 402개 리스트 (전체 포함)
+fixed_tickers = [
     "TTOO", "GWAV", "LUNR", "BBAI", "SOUN", "GNS", "TCBP", "MGIH", "WISA", "IMPP", 
     "GRI", "MRAI", "XFOR", "TENX", "MGRM", "NVOS", "CDIO", "ICU", "MTC", "BDRX", 
     "ABVC", "PHUN", "AEMD", "AKAN", "ASNS", "CXAI", "CYTO", "HOLO", "ICG", "IKT",
@@ -51,33 +52,34 @@ tickers = [
     "PSHG", "PSTI", "PTGX", "PTN", "PUBM", "PULM", "PVL", "PWFL", "QNRX", "QS",
     "REVB", "RGBP", "RKLY", "RMED", "RMNI", "RNER", "RNN", "ROAD", "ROIV", "SAVA",
     "SBIG", "SBNY", "SDC", "SEEL", "SENS", "SESN", "SFT", "SGBX", "SGC",
-    "SGFY", "SGLY", "SHPH", "SIEN", "SIGA", "SILO", "SISI", "SKLZ",
+    "SGFY", "SGLY", "SHPH", "SIEN", "SIGA", "SILO", "SINT", "SISI", "SKLZ",
     "SLGG", "SLNO", "SNAX", "SNDL", "SNES", "SNMP", "SONN", "SOS", "SPCE",
     "SPI", "SPRB", "SQFT", "SRZN", "STAF", "STRC", "SUNW", "SVRE", "SWVL", 
     "SYRS", "TCRT", "TGC", "TGL", "TMPO", "TNON",
-    "TOPS", "TRKA", "TUP", "TVGN", "TYRA", "UAVS", "UCAR", "UPXI",
+    "TNXP", "TOPS", "TRKA", "TUP", "TVGN", "TYRA", "UAVS", "UCAR", "UPXI",
     "URG", "URGN", "USEG", "VGFC", "VHAI", "VIRI", "VISL", "VIVK", "VKTX", "VLD",
     "VLN", "VNRX", "VOR", "VRME", "VRPX", "VUZI", "WIMI", "WKHS", "WLGS", "WRBY", "WTER", "XELA", 
     "XOS", "XSPA", "XTNT", "YELL", "YGMZ", "ZAPP", "ZENV", "ZEV", "ZOM", "ZUMZ"
 ]
 
-# Render 서버 유지용 더미 서버
 def run_dummy_server():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"sm3 is Running!")
+            self.send_response(200); self.end_headers(); self.wfile.write(b"sm3-Turbo Active")
         def log_message(self, format, *args): return 
-    server = HTTPServer(('0.0.0.0', 10000), Handler)
-    server.serve_forever()
+    HTTPServer(('0.0.0.0', 10000), Handler).serve_forever()
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
-def send_ntfy(message):
-    try: requests.post(NTFY_URL, data=message.encode('utf-8'), timeout=5)
-    except: pass
+def get_dynamic_tickers():
+    try:
+        headers = {"APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY}
+        res = requests.get(f"{ALPACA_BASE_URL}/v2/assets?status=active", headers=headers, timeout=10)
+        if res.status_code == 200:
+            pool = [a['symbol'] for a in res.json() if a['tradable'] and a['exchange'] in ['NASDAQ', 'NYSE']]
+            return random.sample(pool, min(len(pool), 300))
+    except: return []
+    return []
 
-# 주문 및 알림 함수
 def buy_order_sm3(ticker, price, stop_loss, strategy_name):
     url = f"{ALPACA_BASE_URL}/v2/orders"
     headers = {"APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY}
@@ -85,74 +87,54 @@ def buy_order_sm3(ticker, price, stop_loss, strategy_name):
     data = {
         "symbol": ticker, "qty": str(qty), "side": "buy", "type": "market",
         "time_in_force": "gtc", "order_class": "bracket",
-        "take_profit": {"limit_price": str(round(price * 1.10, 2))}, # 익절 10% 상향
+        "take_profit": {"limit_price": str(round(price * 1.07, 2))},
         "stop_loss": {"stop_price": str(round(stop_loss, 2))}
     }
     try:
         res = requests.post(url, json=data, headers=headers, timeout=10)
-        status = "성공" if res.status_code == 200 else f"실패({res.status_code})"
-        msg = f"🚀 [{strategy_name}] {ticker}\n매수가: ${price}\n손절가: ${stop_loss}\n상태: {status}"
-        send_ntfy(msg)
-        print(f"[{datetime.now(pytz.timezone('Asia/Seoul')).strftime('%H:%M:%S')}] {msg}")
-    except:
-        print(f"⚠️ {ticker} 통신 에러로 주문 건너뜀")
+        msg = f"🚀 [{strategy_name}] {ticker}\n매수: ${price}\n손절(지지선): ${stop_loss}"
+        requests.post(NTFY_URL, data=msg.encode('utf-8'))
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+    except: pass
 
 def analyze_and_trade(ticker):
     try:
-        # SSL 에러 방지를 위해 timeout 설정 및 에러 무시
-        df = yf.download(ticker, period="1d", interval="5m", progress=False, show_errors=False, timeout=10, include_prepost=True)
+        df = yf.download(ticker, period="1d", interval="5m", progress=False, show_errors=False, timeout=8)
         if df.empty or len(df) < 12: return
+        
+        curr_p = float(df['Close'].iloc[-1])
+        curr_v = df['Volume'].iloc[-1]
+        avg_v = df['Volume'].iloc[-7:-1].mean()
 
-        curr_price = float(df['Close'].iloc[-1])
-        curr_vol = df['Volume'].iloc[-1]
-        avg_vol = df['Volume'].iloc[-7:-1].mean()
-
-        # --- 1. 성민0106 눌림목 노하우 전략 ---
-        # 최근 6봉 이내에 40% 이상 장대양봉이 있었는지 확인
+        # 1. 성민0106 눌림목 반등 (20% 장대양봉 후 두번째 양봉 저가 지지)
         for i in range(-6, -1):
-            open_p = df['Open'].iloc[i]
-            close_p = df['Close'].iloc[i]
-            change = (close_p - open_p) / open_p
-            
-            if change >= 0.40: # 40% 장대양봉 포착
-                second_bar_low = float(df['Low'].iloc[i + 1]) # 두 번째 양봉 저가
-                # 매수 타점: 두 번째 양봉 저가 ±3% 범위
-                if (second_bar_low * 0.97) <= curr_price <= (second_bar_low * 1.03):
-                    buy_order_sm3(ticker, curr_price, second_bar_low, "🔥눌림목")
+            change = (df['Close'].iloc[i] - df['Open'].iloc[i]) / df['Open'].iloc[i]
+            if change >= 0.20:
+                support_p = float(df['Low'].iloc[i + 1])
+                if (support_p * 0.97) <= curr_p <= (support_p * 1.03):
+                    buy_order_sm3(ticker, curr_p, support_p, "🔥눌림목")
                     return
 
-        # --- 2. 완화된 RSI + VWAP 전략 ---
+        # 2. RSI/VWAP 완화 조건
         df['RSI'] = ta.rsi(df['Close'], length=14)
         df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
-        
-        curr_rsi = float(df['RSI'].iloc[-1])
-        prev_rsi = float(df['RSI'].iloc[-2])
-        curr_vwap = float(df['VWAP'].iloc[-1])
-
-        # RSI 30 이상에서 반등 중이고, VWAP 위에 있으며 거래량이 1.2배 터질 때
-        if curr_rsi > 30 and curr_rsi > prev_rsi:
-            if curr_price > curr_vwap and curr_vol > (avg_vol * 1.2):
-                buy_order_sm3(ticker, curr_price, curr_price * 0.97, "📈RSI반등")
-
-    except:
-        pass # 개별 종목 에러 시 중단 없이 다음 종목으로
+        rsi = float(df['RSI'].iloc[-1])
+        if rsi > 30 and rsi > float(df['RSI'].iloc[-2]):
+            if curr_p > float(df['VWAP'].iloc[-1]) and curr_v > (avg_v * 1.2):
+                buy_order_sm3(ticker, curr_p, curr_p * 0.97, "📈RSI반등")
+    except: pass
 
 if __name__ == "__main__":
     KST = pytz.timezone('Asia/Seoul')
-    print("🚀 sm3 통합 버전 시스템 가동 시작")
-    send_ntfy("🚨 [sm3] 성민님, 402개 종목 + 눌림목 전략 탑재 완료! 배포 성공.")
-
+    requests.post(NTFY_URL, data="🚨 sm3-Turbo 최종본 배포 완료!".encode('utf-8'))
     while True:
         now = datetime.now(KST)
-        # 한국 시간 18:00 ~ 익일 06:00 가동
-        if now.hour >= 18 or now.hour < 6:
-            print(f"⏰ {now.strftime('%H:%M:%S')} - 402개 종목 풀스캔 시작...")
-            for ticker in tickers:
+        if 18 <= now.hour or now.hour < 6:
+            scan_list = list(set(fixed_tickers + get_dynamic_tickers()))
+            print(f"⏰ {now.strftime('%H:%M:%S')} - 총 {len(scan_list)}개 터보 스캔")
+            for ticker in scan_list:
                 analyze_and_trade(ticker)
-                time.sleep(0.1) # 서버 부하 방지
-            
-            print(f"✨ 사이클 완료. 12분간 휴식합니다.")
-            time.sleep(720) # 12분 휴식
+                time.sleep(0.1)
+            print("✨ 사이클 완료. 12분 대기."); time.sleep(720)
         else:
-            print(f"💤 현재 한국 시간 {now.hour}시, 시장 휴식기입니다.")
             time.sleep(3600)
