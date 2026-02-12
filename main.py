@@ -65,7 +65,7 @@ fixed_tickers = [
 def run_dummy_server():
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            self.send_response(200); self.end_headers(); self.wfile.write(b"sm3-Turbo Active")
+            self.send_response(200); self.end_headers(); self.wfile.write(b"sm3-Turbo V2 Active")
         def log_message(self, format, *args): return 
     HTTPServer(('0.0.0.0', 10000), Handler).serve_forever()
 threading.Thread(target=run_dummy_server, daemon=True).start()
@@ -83,12 +83,12 @@ def get_dynamic_tickers():
 def buy_order_sm3(ticker, price, stop_loss, strategy_name):
     url = f"{ALPACA_BASE_URL}/v2/orders"
     headers = {"APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY}
-    qty = max(1, int(100 / price))
+    qty = max(1, int(100 / price)) # 100달러치 매수
     data = {
         "symbol": ticker, "qty": str(qty), "side": "buy", "type": "market",
         "time_in_force": "gtc", "order_class": "bracket",
-        "take_profit": {"limit_price": str(round(price * 1.07, 2))},
-        "stop_loss": {"stop_price": str(round(stop_loss, 2))}
+        "take_profit": {"limit_price": str(round(price * 1.07, 2))}, # 7% 익절
+        "stop_loss": {"stop_price": str(round(stop_loss, 2))} # 지지선 이탈 시 손절
     }
     try:
         res = requests.post(url, json=data, headers=headers, timeout=10)
@@ -106,16 +106,18 @@ def analyze_and_trade(ticker):
         curr_v = df['Volume'].iloc[-1]
         avg_v = df['Volume'].iloc[-7:-1].mean()
 
-        # 1. 성민0106 눌림목 반등 (20% 장대양봉 후 두번째 양봉 저가 지지)
+        # --- 핵심: 성민0106 눌림목 (20% 완화 조건 반영) ---
         for i in range(-6, -1):
+            # i번째 봉이 20% 이상 장대양봉인지 확인
             change = (df['Close'].iloc[i] - df['Open'].iloc[i]) / df['Open'].iloc[i]
-            if change >= 0.20:
-                support_p = float(df['Low'].iloc[i + 1])
+            if change >= 0.20: # 40% -> 20% 수정 완료
+                support_p = float(df['Low'].iloc[i + 1]) # 두 번째 봉의 저가
+                # 현재가가 지지선 근처(±3%)에 왔을 때 매수
                 if (support_p * 0.97) <= curr_p <= (support_p * 1.03):
-                    buy_order_sm3(ticker, curr_p, support_p, "🔥눌림목")
+                    buy_order_sm3(ticker, curr_p, support_p, "🔥20%눌림목")
                     return
 
-        # 2. RSI/VWAP 완화 조건
+        # 2. RSI/VWAP 전략 (RSI 30 반등 + 거래량 1.2배)
         df['RSI'] = ta.rsi(df['Close'], length=14)
         df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
         rsi = float(df['RSI'].iloc[-1])
@@ -126,15 +128,17 @@ def analyze_and_trade(ticker):
 
 if __name__ == "__main__":
     KST = pytz.timezone('Asia/Seoul')
-    requests.post(NTFY_URL, data="🚨 sm3-Turbo 최종본 배포 완료!".encode('utf-8'))
+    # 배포 알림 전송 (배포 성공 여부 확인용)
+    requests.post(NTFY_URL, data="🚨 sm3-Turbo [20% 기준] 배포 완료! 스캔 시작.".encode('utf-8'))
+    
     while True:
         now = datetime.now(KST)
         if 18 <= now.hour or now.hour < 6:
             scan_list = list(set(fixed_tickers + get_dynamic_tickers()))
-            print(f"⏰ {now.strftime('%H:%M:%S')} - 총 {len(scan_list)}개 터보 스캔")
+            print(f"⏰ {now.strftime('%H:%M:%S')} - 총 {len(scan_list)}개 터보 스캔 (20% 기준)")
             for ticker in scan_list:
                 analyze_and_trade(ticker)
-                time.sleep(0.1)
+                time.sleep(0.1) # 서버 보호용
             print("✨ 사이클 완료. 12분 대기."); time.sleep(720)
         else:
             time.sleep(3600)
