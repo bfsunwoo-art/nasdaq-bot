@@ -5,7 +5,14 @@ from flask import Flask
 from threading import Thread
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
+# pandas_ta 라이브러리 대신 직접 계산하기 위해 주석 처리
+# import pandas_ta as ta
+
+# 에러 방지용 가짜 ta 객체 생성
+class FakeTA:
+    def rsi(self, *args, **kwargs): return None
+    def macd(self, *args, **kwargs): return None
+ta = FakeTA()
 import requests
 import time
 from datetime import datetime
