@@ -1,6 +1,5 @@
 yfinance==0.2.36
 pandas==2.1.4
-pandas_ta @ git+https://github.com/twopirllc/pandas-ta.git@main
 requests==2.31.0
 urllib3==1.26.18
 flask==2.3.3
