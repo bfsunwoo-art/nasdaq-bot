@@ -4,3 +4,5 @@ pandas_ta
 requests
 pytz
 Flask
+alpaca-trade-api
+gunicorn
