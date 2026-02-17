@@ -1,8 +1,8 @@
-yfinance
-pandas
-pandas_ta
-requests
-pytz
-Flask
-alpaca-trade-api
-gunicorn
+yfinance==0.2.36
+pandas==2.1.4
+pandas-ta==0.3.14b0
+requests==2.31.0
+urllib3==1.26.18
+flask==3.0.0
+gunicorn==21.2.0
+python-dotenv==1.0.0
