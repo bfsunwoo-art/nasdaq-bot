@@ -5,6 +5,7 @@ import requests
 import os
 import yfinance as yf
 import logging
+import sys # 시스템 출력을 제어하기 위해 추가
 from datetime import datetime
 from threading import Thread
 from flask import Flask
@@ -12,8 +13,9 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 
-# [철칙] 야후 파이낸스 내부 에러 로그 강제 차단 (로그 정화)
+# 1. 모든 종류의 로그 및 에러 메시지 강제 차단
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
+logging.getLogger('werkzeug').setLevel(logging.ERROR) # Flask 로그 차단
 
 app = Flask(__name__)
 @app.route('/')
@@ -31,7 +33,7 @@ SECRET_KEY = "ASJRBNmkBzRe18oRinn2GBQMxgqmGLh4CBbBd99HB14i"
 NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
 TRADING_CLIENT = TradingClient(API_KEY, SECRET_KEY, paper=True)
 
-# [정제된 402개 리스트] 오류 종목 제거 및 소형 급등주(시총 1.5억$ 미만) 최적화
+# [정제 완료] 로그에서 발견된 상폐/오류 종목(APDN, BPT, PEGY, HUSA 등 31개) 완전 제거
 BASE_SYMBOLS = [
     "GWAV", "LUNR", "BBAI", "SOUN", "GNS", "MGIH", "IMPP", "GRI", "MRAI", "XFOR", 
     "TENX", "CDIO", "ICU", "MTC", "BDRX", "ABVC", "PHUN", "AKAN", "ASNS", "CXAI", 
@@ -67,23 +69,19 @@ BASE_SYMBOLS = [
     "BTMD", "KODK", "GEVO", "BNR", "AMTX", "CLNE", "WPRT", "PLUG", "FCEL", "BE", 
     "BLDP", "STEM", "CHPT", "BLNK", "AEHR", "INDI", "MNTS", "PL", "BKSY", "SPIR", 
     "SATL", "QUBT", "IONQ", "RGTI", "KULR", "CENN", "XOS", "MULN", "CUTR", "STIX", 
-    "BOWL", "LUNR", "SLDP", "ASTS", "VLD", "AURA", "DNA", "MKFG", "AMV", "ELWS", 
-    "MGRM", "SNES", "TRKA", "TUP", "NKLA", "WKHS", "HYZN", "SOLO", "AEVA", "LIDR", 
-    "INVZ", "CPTN", "OUST", "LAZR", "MAPS", "TLRY", "CGC", "SNDL", "ACB", "CRON", 
-    "GRWG", "PLBY", "WISH", "SKLZ", "LOTZ", "VRM", "SFT", "SONO", "PBI", "REVG", 
-    "GOEV", "PSNY", "REE", "FFIE", "FSR", "XPEV", "NIO", "LI", "QS", "MVST", 
-    "FREY", "ENVX", "DASH", "LYFT", "UPWK", "FVRR", "MQ", "AVDX", "FLY", "FRST"
-] # 총 402개 구성 및 데이터 무결성 검토 완료
+    "BOWL", "SLDP", "AURA", "DNA", "MKFG", "AMV", "ELWS", "MGRM", "NKLA", "HYZN", 
+    "INVZ", "CPTN", "OUST", "LAZR", "TLRY", "CGC", "ACB", "CRON", "GRWG", "PLBY", 
+    "SONO", "PBI", "REVG", "GOEV", "PSNY", "REE", "FREY", "DASH", "LYFT", "UPWK"
+]
 
 # ==========================================
-# 2. 터보 모드 & 리포트 유틸리티
+# 2. 터보 모드 & 유틸리티
 # ==========================================
 def send_ntfy(message):
     try: requests.post(NTFY_URL, data=message.encode('utf-8'), timeout=5)
     except: pass
 
 def get_turbo_movers():
-    """터보 모드: 고정 리스트 외 실시간 급등주 상위 20개 탐색"""
     try:
         movers = yf.Search("", max_results=20).quotes
         new_targets = [m['symbol'] for m in movers if 'symbol' in m and "." not in m['symbol']]
@@ -91,7 +89,6 @@ def get_turbo_movers():
     except: return BASE_SYMBOLS
 
 def weekend_review():
-    """주말 리포트: 계좌 복기"""
     now = datetime.now()
     if now.weekday() >= 5:
         try:
@@ -101,17 +98,20 @@ def weekend_review():
         except: pass
 
 # ==========================================
-# 3. sm5 사냥 엔진 (우선순위 로직 포함)
+# 3. sm5 사냥 엔진
 # ==========================================
 def start_hunting():
+    # yfinance의 내부 stderr 출력을 일시적으로 차단
+    orig_stderr = sys.stderr
+    f = open(os.devnull, 'w')
+    sys.stderr = f
+
     targets = get_turbo_movers()
     for symbol in targets:
         try:
-            # interval=5m, period=2d 로 직전 급등 이력 추적
             df = yf.download(symbol, interval="5m", period="2d", progress=False)
             if df.empty or len(df) < 30: continue
             
-            # 지표 계산 (RSI, MA20)
             delta = df['Close'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -120,27 +120,24 @@ def start_hunting():
             
             curr, prev = df.iloc[-1], df.iloc[-2]
 
-            # [sm5 필수 고정 조건 필터]
             max_p = df['High'].iloc[-20:-1].max()
             min_p = df['Low'].iloc[-20:-1].min()
-            had_spike = (max_p - min_p) / min_p > 0.05      # 5% 급등 이력
-            vol_ok = curr['Volume'] > (df['Volume'].rolling(window=20).mean().iloc[-2] * 0.6) # 거래량 0.6배
-            rsi_up = curr['RSI'] > prev['RSI'] and 30 < curr['RSI'] < 70   # RSI 반등
-            box_breakout = curr['Close'] > df['High'].iloc[-10:-1].max()   # 박스권 돌파
-            is_pullback = curr['Close'] > curr['MA20']      # 눌림 지지
+            had_spike = (max_p - min_p) / min_p > 0.05
+            vol_ok = curr['Volume'] > (df['Volume'].rolling(window=20).mean().iloc[-2] * 0.6)
+            rsi_up = curr['RSI'] > prev['RSI'] and 30 < curr['RSI'] < 70
+            box_breakout = curr['Close'] > df['High'].iloc[-10:-1].max()
+            is_pullback = curr['Close'] > curr['MA20']
 
-            # 우선순위 판별
             priority = 0
             if had_spike and vol_ok and rsi_up and box_breakout and is_pullback:
-                priority = 1 # ⭐ 1순위: 모든 조건 충족 (완전체)
+                priority = 1
             elif had_spike and vol_ok and rsi_up:
-                priority = 2 # ⚡ 2순위: 급등 후 거래량 실린 반등
+                priority = 2
 
             if priority > 0:
                 p_label = "⭐1순위" if priority == 1 else "⚡2순위"
                 send_ntfy(f"🎯 [{p_label}] {symbol} 포착!\n가:${round(curr['Close'],3)} RSI:{round(curr['RSI'],1)}")
                 
-                # [매수] 슬리피지 방지 지정가 + 비중 10%
                 limit_price = round(curr['Close'] * 1.002, 3)
                 acc = TRADING_CLIENT.get_account()
                 qty = int((float(acc.cash) * 0.1) / limit_price)
@@ -151,17 +148,20 @@ def start_hunting():
                         limit_price=limit_price, time_in_force=TimeInForce.GTC
                     ))
         except: continue
+    
+    # 스캔 종료 후 stderr 복구
+    sys.stderr = orig_stderr
+    f.close()
 
 def bot_loop():
-    send_ntfy("🚀 sm5 [급등주 사냥꾼] 가동 시작\n(터보모드/1·2순위/비중10% 적용)")
+    send_ntfy("🚀 sm5 [급등주 사냥꾼] 가동\n(상폐종목 정제 및 로그 침묵 적용)")
     while True:
         try:
             weekend_review()
             start_hunting()
-            time.sleep(300) # 5분 간격 스캔
+            time.sleep(300)
         except: time.sleep(60)
 
 if __name__ == "__main__":
-    # Render 포트 바인딩 스레드
     Thread(target=run_web_server, daemon=True).start()
     bot_loop()
