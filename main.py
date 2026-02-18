@@ -6,6 +6,8 @@ import pandas_ta as ta
 import requests
 from pybit.unified_trading import HTTP
 from datetime import datetime, timedelta
+from flask import Flask  # Render 배포 성공을 위해 추가
+import threading      # 가짜 서버를 백그라운드에서 돌리기 위해 추가
 
 # ==========================================
 # 1. 설정 및 생존 로직 (stderr 차단)
@@ -16,9 +18,21 @@ API_KEY = "PKHQEN22KBWB2HSXRGMPWQ3QYL"
 API_SECRET = "ASJRBNmkBzRe18oRinn2GBQMxgqmGLh4CBbBd99HB14i"
 NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
 
+# --- [추가] Render 포트 바인딩용 가짜 서버 ---
+app = Flask(__name__)
+@app.route('/')
+def health_check():
+    return "Sm5 Hunting System is Online", 200
+
+def run_web_server():
+    # Render는 PORT 환경변수를 사용하거나 기본 10000번을 사용합니다.
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+# ------------------------------------------
+
 session = HTTP(testnet=True, api_key=API_KEY, api_secret=API_SECRET)
 
-# [핵심 유전자] 시총 1,500억 미만 소형주 402개 리스트 (누락 없이 유지)
+# [핵심 유전자] 시총 1,500억 미만 소형주 402개 리스트
 BASE_SYMBOLS = [
     "ROLR", "JTAI", "GWAV", "LUNR", "BBAI", "SOUN", "GNS", "MGIH", "IMPP", "CING",
     "SNAL", "MRAI", "BRLS", "HUBC", "AGBA", "ICU", "TPST", "LGVN", "CNEY", "SCPX",
@@ -69,9 +83,10 @@ def send_ntfy(message):
     except: pass
 
 # ==========================================
-# 2. 한국 시간(KST) 및 주말 리포트
+# 2. 한국 시간(KST) 및 리포트 로직
 # ==========================================
 def get_kst_now():
+    # Render 서버 시간(UTC)에 9시간을 더해 한국 시간 반환
     return datetime.utcnow() + timedelta(hours=9)
 
 def send_weekend_report():
@@ -88,6 +103,7 @@ def send_weekend_report():
         trade_history.clear()
 
 def check_heartbeat():
+    # [수정] 한국 시간(KST) 기준으로 알림 전송
     kst_now = get_kst_now()
     if kst_now.minute == 0:
         send_ntfy(f"📡 [sm5] {kst_now.strftime('%H:%M')} 가동 중 | 포지션: {len(active_positions)}개")
@@ -121,29 +137,22 @@ def manage_position(symbol, curr_price):
     if symbol not in active_positions: return
     pos = active_positions[symbol]
     
-    # 최고가 갱신 (Trailing 기초)
     pos['highest_price'] = max(pos.get('highest_price', curr_price), curr_price)
-    
     profit = (curr_price - pos['entry_price']) / pos['entry_price']
     drop_from_top = (pos['highest_price'] - curr_price) / pos['highest_price']
     priority = pos['priority']
 
-    # 1, 2순위: 추적 익절 로직 (고점 대비 3% 하락 시)
     if priority in [1, 2]:
-        # 손절: 진입가 대비 -3%
         if profit <= -0.03:
             msg = f"📉 [손절] {symbol} ({priority}순위)\n손실률: {profit*100:.2f}%"
             send_ntfy(msg)
             trade_history.append({'symbol': symbol, 'profit': profit*100})
             del active_positions[symbol]
-        # 익절: 수익권이면서 고점 대비 3% 하락했을 때
         elif profit > 0 and drop_from_top >= 0.03:
             msg = f"💰 [추적익절] {symbol} ({priority}순위)\n최종수익: {profit*100:.2f}%\n고점대비하락: {drop_from_top*100:.2f}%"
             send_ntfy(msg)
             trade_history.append({'symbol': symbol, 'profit': profit*100})
             del active_positions[symbol]
-
-    # 3순위: 고정 익절 5% / 손절 3%
     elif priority == 3:
         if profit >= 0.05:
             send_ntfy(f"💰 [3순위 익절] {symbol}\n수익률: {profit*100:.2f}%")
@@ -172,7 +181,6 @@ def start_hunting(symbol):
     curr, prev = df.iloc[-1], df.iloc[-2]
     vol_avg = df['Volume'].rolling(window=20).mean().iloc[-2]
     
-    # 조건 체크
     vol_ok = curr['Volume'] > (vol_avg * 0.6)
     vol_surge = curr['Volume'] > (vol_avg * 1.5)
     had_spike = (df['High'].iloc[-10:].max() / df['Low'].iloc[-10:].min()) > 1.05
@@ -194,10 +202,14 @@ def start_hunting(symbol):
         send_ntfy(f"🎯 [{priority}순위 포착] {symbol}\n진입가: {buy_price}\n비중: {weight*100}%")
 
 # ==========================================
-# 5. 메인 루프
+# 5. 메인 루프 (업데이트됨)
 # ==========================================
 if __name__ == "__main__":
-    send_ntfy("🚀 sm5-위대한 항로 V3.2 사냥 시작")
+    # 1. 포트 감시용 가짜 서버 스레드 실행 (Render 배포 통과용)
+    threading.Thread(target=run_web_server, daemon=True).start()
+    
+    send_ntfy(f"🚀 sm5-위대한 항로 V3.2 사냥 시작 (KST 적용)")
+    
     while True:
         try:
             if not is_market_safe():
