@@ -3,3 +3,4 @@ numpy
 yfinance
 alpaca-py
 requests
+flask
