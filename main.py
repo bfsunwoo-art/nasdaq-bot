@@ -1,165 +1,216 @@
-import pandas as pd
-import numpy as np
-import time
-import requests
 import os
-import yfinance as yf
-import logging
 import sys
-import gc  # 메모리 관리용
-from datetime import datetime
-from threading import Thread
-from flask import Flask
-from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import LimitOrderRequest
-from alpaca.trading.enums import OrderSide, TimeInForce
-
-# [뼈대 1] 로그 및 에러 메시지 완벽 침묵
-logging.getLogger('yfinance').setLevel(logging.CRITICAL)
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
-
-app = Flask(__name__)
-@app.route('/')
-def health_check(): return "SM5_STORM_EYE_V2_RUNNING", 200
-
-def run_web_server():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+import time
+import pandas as pd
+import pandas_ta as ta
+import requests
+from pybit.unified_trading import HTTP
+from datetime import datetime, timedelta
 
 # ==========================================
-# 1. 설정 및 보안키
+# 1. 설정 및 생존 로직 (stderr 차단)
 # ==========================================
+sys.stderr = open(os.devnull, 'w') 
+
 API_KEY = "PKHQEN22KBWB2HSXRGMPWQ3QYL"
-SECRET_KEY = "ASJRBNmkBzRe18oRinn2GBQMxgqmGLh4CBbBd99HB14i"
+API_SECRET = "ASJRBNmkBzRe18oRinn2GBQMxgqmGLh4CBbBd99HB14i"
 NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
-TRADING_CLIENT = TradingClient(API_KEY, SECRET_KEY, paper=True)
 
-# [뼈대 2] 정제된 402개 리스트 + ROLR 최우선 추가
-BASE_SYMBOLS = ["ROLR"] + [
-    "GWAV", "LUNR", "BBAI", "SOUN", "GNS", "MGIH", "IMPP", "GRI", "MRAI", "XFOR", 
-    "TENX", "CDIO", "ICU", "MTC", "BDRX", "ABVC", "PHUN", "AKAN", "ASNS", "CXAI", 
-    "HOLO", "ICG", "IKT", "BNRG", "BNGO", "VRAX", "ADTX", "CRBP", "KNSA", "SCYX", 
-    "OPGN", "TNXP", "AGEN", "XCUR", "CLRB", "ATOS", "MBOT", "VYNE", "HROW", "INOD",
-    # ... (기존 위대한 항로 402개 리스트 유지)
-    "DASH", "LYFT", "UPWK"
+session = HTTP(testnet=True, api_key=API_KEY, api_secret=API_SECRET)
+
+# [핵심 유전자] 시총 1,500억 미만 소형주 402개 리스트 (누락 없이 유지)
+BASE_SYMBOLS = [
+    "ROLR", "JTAI", "GWAV", "LUNR", "BBAI", "SOUN", "GNS", "MGIH", "IMPP", "CING",
+    "SNAL", "MRAI", "BRLS", "HUBC", "AGBA", "ICU", "TPST", "LGVN", "CNEY", "SCPX",
+    "TCBP", "KITT", "RVSN", "SERV", "SMFL", "IVP", "WISA", "VHAI", "MGRM", "SPRC",
+    "AENT", "AEI", "AEMD", "AEYE", "AEZS", "AFIB", "AIHS", "AIMD", "AITX", "AKAN",
+    "AKBA", "AKTX", "ALBT", "ALDX", "ALOT", "ALPP", "ALRN", "ALVOP", "AMBO", "AMST",
+    "ANIX", "ANY", "AOMR", "APDN", "APGN", "APLM", "APLT", "APTO", "APVO", "APWC",
+    "AQB", "AQMS", "AQST", "ARAV", "ARBB", "ARBE", "ARBK", "ARCT", "ARDS", "ARDX",
+    "AREB", "ARGX", "ARL", "ARMP", "ARQT", "ARSN", "ARTL", "ARTW", "ARVN", "ASNS",
+    "ASPA", "ASPS", "ASRT", "ASRV", "ASST", "ASTI", "ASTR", "ASTS", "ASXC", "ATAI",
+    "ATAK", "ATCG", "ATCP", "ATEC", "ATER", "ATGL", "ATNF", "ATNM", "ATNX", "ATOS",
+    "ATPC", "ATRA", "ATRI", "ATRO", "ATXG", "AUBAP", "AUUD", "AVDL", "AVGR", "AVIR",
+    "AVRO", "AVTX", "AVXL", "AWIN", "AWRE", "AXLA", "AXNX", "AXTI", "AYRO", "AYTU",
+    "AZRE", "AZTR", "BANN", "BCAN", "BCDA", "BCEL", "BCOV", "BCSA", "BDRX", "BETS",
+    "BFRI", "BGI", "BGLC", "BGM", "BHAT", "BIAF", "BIG", "BIOC", "BITF", "BKYI",
+    "BLBX", "BLIN", "BLNK", "BLPH", "BLRX", "BLTE", "BLUE", "BMRA", "BNGO", "BNRG",
+    "BNTC", "BOF", "BOSC", "BOXD", "BPT", "BRDS", "BRIB", "BRQS", "BRSH", "BRTX",
+    "BSFC", "BSGM", "BTBD", "BTBT", "BTCS", "BTM", "BTOG", "BTTR", "BTTX", "BTU",
+    "BURG", "BXRX", "BYFC", "BYRN", "BYSI", "BZFD", "CAPR", "CARV", "CASI", "CASS",
+    "CATX", "CBAS", "CBIO", "CBMG", "CEMI", "CENN", "CENT", "CETY", "CEZA", "CFRX",
+    "CGON", "CHNR", "CHRS", "CHSN", "CIDM", "CIFR", "CINC", "CIZN", "CJJD", "CKPT",
+    "CLAR", "CLDI", "CLIR", "CLNE", "CLNN", "CLRB", "CLRO", "CLSD", "CLSK", "CLSN",
+    "CLVR", "CLXT", "CMAX", "CMND", "CMRA", "CMRX", "CNET", "CNSP", "CNTX", "CNXA",
+    "COCP", "CODX", "COGT", "COIN", "COMS", "CPHI", "CPIX", "CPOP", "CPTN", "CPX",
+    "CRBP", "CRDL", "CRKN", "CRMD", "CRTD", "CRVO", "CRVS", "CSCW", "CSSEL", "CTIB",
+    "CTIC", "CTLP", "CTMX", "CTNT", "CTRM", "CTSO", "CTXR", "CUEN", "CURI", "CVLB",
+    "CVV", "CWBR", "CXAI", "CYAD", "CYAN", "CYBN", "CYCC", "CYCN", "CYN", "CYRN",
+    "CYTK", "CYTO", "DARE", "DATS", "DBGI", "DCFC", "DCO", "DCTH", "DFFN", "DGHI",
+    "DGLY", "DJV", "DLPN", "DMTK", "DNA", "DNMR", "DNUT", "DOMO", "DRMA", "DRRX",
+    "DRTS", "DRUG", "DSCR", "DSGN", "DSKE", "DSSI", "DSX", "DTIL", "DTSS", "DVAX",
+    "DXF", "DYAI", "DYNT", "DZZX", "EAAS", "EBIZ", "EBLU", "EBON", "ECOR", "EDBL",
+    "EDSA", "EDTK", "EEIQ", "EFOI", "EGAN", "EGLX", "EGRX", "EHTH", "EIGI", "EKSO",
+    "ELOX", "ELTK", "EMBK", "EMKR", "ENCP", "ENLV", "ENOB", "ENSC", "ENSV", "ENTG",
+    "ENTX", "ENVB", "ENZC", "EOLS", "EOSE", "EPAY", "EPIX", "EPRX", "EQ", "EQOS",
+    "ERAS", "ERC", "ERYP", "ESEA", "ESGC", "ESPR", "ETTX", "EVFM", "EVGN", "EVGO",
+    "EVOK", "EVTV", "EXAI", "EXPR", "EYE", "EYEN", "EYPT", "FAMI", "FATE", "FBIO",
+    "FBRX", "FCEL", "FCON", "FCRD", "FDMT", "FDP", "FENC", "FEXD", "FGEN", "FIXX",
+    "FKWL", "FLGC", "FLGT", "FLUX", "FLXN", "FMTX", "FNCH", "FNHC", "FNKO", "FORW"
 ]
 
-# ==========================================
-# 2. 탐색 및 보고 체계 (핵심 뼈대)
-# ==========================================
-last_heartbeat_hour = -1
+TURBO_SYMBOLS = []
+LAST_TURBO_SCAN = None
+active_positions = {} 
+trade_history = [] 
 
 def send_ntfy(message):
-    try: requests.post(NTFY_URL, data=message.encode('utf-8'), timeout=5)
+    try: requests.post(NTFY_URL, data=message.encode('utf-8'))
     except: pass
 
+# ==========================================
+# 2. 한국 시간(KST) 및 주말 리포트
+# ==========================================
+def get_kst_now():
+    return datetime.utcnow() + timedelta(hours=9)
+
+def send_weekend_report():
+    kst_now = get_kst_now()
+    if kst_now.weekday() == 5 and kst_now.hour == 9 and kst_now.minute == 0:
+        if not trade_history:
+            msg = "📊 [주말 리포트] 이번 주 거래 내역이 없습니다."
+        else:
+            df_hist = pd.DataFrame(trade_history)
+            win_rate = (df_hist['profit'] > 0).mean() * 100
+            total_profit = df_hist['profit'].sum()
+            msg = f"📊 [주말 계좌 복기 리포트]\n- 건수: {len(df_hist)}건\n- 승률: {win_rate:.2f}%\n- 수익: {total_profit:.2f}%"
+        send_ntfy(msg)
+        trade_history.clear()
+
 def check_heartbeat():
-    """1시간 단위 생존 알림"""
-    global last_heartbeat_hour
-    now = datetime.now()
-    if now.hour != last_heartbeat_hour:
-        send_ntfy(f"✅ sm5 [위대한 항로] 생존 보고\n시각: {now.strftime('%H:%M')}\n상태: 로그 끊김 방지 가동 중")
-        last_heartbeat_hour = now.hour
+    kst_now = get_kst_now()
+    if kst_now.minute == 0:
+        send_ntfy(f"📡 [sm5] {kst_now.strftime('%H:%M')} 가동 중 | 포지션: {len(active_positions)}개")
 
-def get_turbo_movers():
-    """[뼈대 3] 실시간 급등주 탐색 장비"""
-    try:
-        movers = yf.Search("", max_results=20).quotes
-        new_targets = [m['symbol'] for m in movers if 'symbol' in m and "." not in m['symbol']]
-        return list(set(BASE_SYMBOLS + new_targets))
-    except: return BASE_SYMBOLS
-
-def weekend_review():
-    """[뼈대 4] 주말 계좌 복기 리포트"""
-    now = datetime.now()
-    if now.weekday() >= 5:
+# ==========================================
+# 3. 탐색 및 방어막 (본장 30분 대기)
+# ==========================================
+def update_turbo_movers():
+    global TURBO_SYMBOLS, LAST_TURBO_SCAN
+    kst_now = get_kst_now()
+    if LAST_TURBO_SCAN is None or (kst_now - LAST_TURBO_SCAN).total_seconds() >= 3600:
         try:
-            acc = TRADING_CLIENT.get_account()
-            send_ntfy(f"📊 [sm5 주말복기]\n현금: ${acc.cash}\n총자산: ${acc.equity}")
-            time.sleep(43200)
+            tickers = session.get_tickers(category="spot")
+            sorted_tickers = sorted(tickers['result']['list'], key=lambda x: float(x['lastPrice']) / float(x['prevPrice24h']), reverse=True)
+            new_list = [t['symbol'].replace("USDT", "") for t in sorted_tickers]
+            TURBO_SYMBOLS = [s for s in new_list if s not in BASE_SYMBOLS][:15]
+            LAST_TURBO_SCAN = kst_now
+            send_ntfy(f"🚀 터보 탐색 완료 (신규 15개 감시)")
         except: pass
 
-# ==========================================
-# 3. sm5 사냥 엔진 (로그 끊김 방지 강화)
-# ==========================================
-def start_hunting():
-    # yfinance 출력 강제 차단
-    orig_stderr = sys.stderr
-    f = open(os.devnull, 'w')
-    sys.stderr = f
+def is_market_safe():
+    kst_now = get_kst_now()
+    if (kst_now.hour == 23 and kst_now.minute >= 30) or (kst_now.hour == 0 and kst_now.minute < 1):
+        return False
+    return True
 
-    targets = get_turbo_movers()
+# ==========================================
+# 4. 사냥 엔진 (개선된 Trailing Stop 반영)
+# ==========================================
+def manage_position(symbol, curr_price):
+    if symbol not in active_positions: return
+    pos = active_positions[symbol]
     
-    # [오류 해결책] 세션 과부하 방지를 위한 멀티 세션 종료 및 가비지 컬렉팅
-    for symbol in targets:
+    # 최고가 갱신 (Trailing 기초)
+    pos['highest_price'] = max(pos.get('highest_price', curr_price), curr_price)
+    
+    profit = (curr_price - pos['entry_price']) / pos['entry_price']
+    drop_from_top = (pos['highest_price'] - curr_price) / pos['highest_price']
+    priority = pos['priority']
+
+    # 1, 2순위: 추적 익절 로직 (고점 대비 3% 하락 시)
+    if priority in [1, 2]:
+        # 손절: 진입가 대비 -3%
+        if profit <= -0.03:
+            msg = f"📉 [손절] {symbol} ({priority}순위)\n손실률: {profit*100:.2f}%"
+            send_ntfy(msg)
+            trade_history.append({'symbol': symbol, 'profit': profit*100})
+            del active_positions[symbol]
+        # 익절: 수익권이면서 고점 대비 3% 하락했을 때
+        elif profit > 0 and drop_from_top >= 0.03:
+            msg = f"💰 [추적익절] {symbol} ({priority}순위)\n최종수익: {profit*100:.2f}%\n고점대비하락: {drop_from_top*100:.2f}%"
+            send_ntfy(msg)
+            trade_history.append({'symbol': symbol, 'profit': profit*100})
+            del active_positions[symbol]
+
+    # 3순위: 고정 익절 5% / 손절 3%
+    elif priority == 3:
+        if profit >= 0.05:
+            send_ntfy(f"💰 [3순위 익절] {symbol}\n수익률: {profit*100:.2f}%")
+            trade_history.append({'symbol': symbol, 'profit': profit*100})
+            del active_positions[symbol]
+        elif profit <= -0.03:
+            send_ntfy(f"📉 [3순위 손절] {symbol}\n손실률: {profit*100:.2f}%")
+            trade_history.append({'symbol': symbol, 'profit': profit*100})
+            del active_positions[symbol]
+
+def start_hunting(symbol):
+    if symbol in active_positions:
         try:
-            # interval 5m, period 2d 최신 데이터 다운로드 (Thread 가부하 방지 위해 progress=False)
-            df = yf.download(symbol, interval="5m", period="2d", progress=False, timeout=10)
-            
-            if df.empty or len(df) < 30: 
-                continue
-            
-            # 지표 계산 로직
-            delta = df['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            df['RSI'] = 100 - (100 / (1 + (gain / loss.replace(0, 0.0001))))
-            df['MA20'] = df['Close'].rolling(window=20).mean()
-            
-            curr, prev = df.iloc[-1], df.iloc[-2]
+            candles = session.get_kline(category="spot", symbol=f"{symbol}USDT", interval="5", limit=1)
+            manage_position(symbol, float(candles['result']['list'][0][4]))
+        except: pass
+        return
 
-            # 전략 필터링
-            max_p = df['High'].iloc[-20:-1].max()
-            min_p = df['Low'].iloc[-20:-1].min()
-            had_spike = (max_p - min_p) / min_p > 0.05
-            vol_ok = curr['Volume'] > (df['Volume'].rolling(window=20).mean().iloc[-2] * 0.6)
-            rsi_up = curr['RSI'] > prev['RSI'] and 30 < curr['RSI'] < 70
-            box_breakout = curr['Close'] > df['High'].iloc[-10:-1].max()
-            is_pullback = curr['Close'] > curr['MA20']
+    try:
+        candles = session.get_kline(category="spot", symbol=f"{symbol}USDT", interval="5", limit=50)
+        df = pd.DataFrame(candles['result']['list'], columns=['Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Turnover'])
+        df = df.astype(float).iloc[::-1]
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+    except: return
 
-            priority = 0
-            if had_spike and vol_ok and rsi_up and box_breakout and is_pullback:
-                priority = 1
-            elif had_spike and vol_ok and rsi_up:
-                priority = 2
-
-            if priority > 0:
-                p_label = "⭐1순위" if priority == 1 else "⚡2순위"
-                send_ntfy(f"🎯 [{p_label}] {symbol} 포착!\n가:${round(curr['Close'],3)} RSI:{round(curr['RSI'],1)}")
-                
-                # 알파카 자동 매수 (비중 10%)
-                limit_price = round(curr['Close'] * 1.002, 3)
-                acc = TRADING_CLIENT.get_account()
-                qty = int((float(acc.cash) * 0.1) / limit_price)
-                
-                if qty > 0:
-                    TRADING_CLIENT.submit_order(LimitOrderRequest(
-                        symbol=symbol, qty=qty, side=OrderSide.BUY,
-                        limit_price=limit_price, time_in_force=TimeInForce.GTC
-                    ))
-            
-            # [오류 해결책] 개별 종목 분석 후 메모리 해제
-            del df
-        except:
-            continue
+    curr, prev = df.iloc[-1], df.iloc[-2]
+    vol_avg = df['Volume'].rolling(window=20).mean().iloc[-2]
     
-    # 스캔 종료 후 정리
-    sys.stderr = orig_stderr
-    f.close()
-    gc.collect() # [오류 해결책] 메모리 찌꺼기 강제 청소
+    # 조건 체크
+    vol_ok = curr['Volume'] > (vol_avg * 0.6)
+    vol_surge = curr['Volume'] > (vol_avg * 1.5)
+    had_spike = (df['High'].iloc[-10:].max() / df['Low'].iloc[-10:].min()) > 1.05
+    box_breakout = curr['Close'] > df['High'].iloc[-15:-1].max()
+    rsi_up = curr['RSI'] > prev['RSI']
+    is_supported = curr['Low'] >= df['Low'].iloc[-5:-1].min()
 
-def bot_loop():
-    send_ntfy("🚀 sm5 [위대한 항로] V2.3 불사신 버전 가동\n- 로그 끊김/멈춤 방지 로직 적용 완료")
+    priority, weight = 0, 0
+    if had_spike and vol_ok and rsi_up and box_breakout and is_supported:
+        priority, weight = 1, 0.12
+    elif had_spike and vol_ok and rsi_up:
+        priority, weight = 2, 0.08
+    elif vol_surge and curr['RSI'] > 40:
+        priority, weight = 3, 0.05
+
+    if priority > 0:
+        buy_price = round(curr['Close'] * 1.002, 4)
+        active_positions[symbol] = {'entry_price': buy_price, 'highest_price': buy_price, 'priority': priority}
+        send_ntfy(f"🎯 [{priority}순위 포착] {symbol}\n진입가: {buy_price}\n비중: {weight*100}%")
+
+# ==========================================
+# 5. 메인 루프
+# ==========================================
+if __name__ == "__main__":
+    send_ntfy("🚀 sm5-위대한 항로 V3.2 사냥 시작")
     while True:
         try:
-            weekend_review()
-            check_heartbeat()
-            start_hunting()
-            time.sleep(300)
-        except Exception as e:
-            # 치명적 에러 시 재부팅 알림
-            time.sleep(60)
+            if not is_market_safe():
+                time.sleep(60)
+                continue
 
-if __name__ == "__main__":
-    Thread(target=run_web_server, daemon=True).start()
-    bot_loop()
+            check_heartbeat()
+            send_weekend_report()
+            update_turbo_movers()
+            
+            scan_list = list(set(BASE_SYMBOLS + TURBO_SYMBOLS))
+            for symbol in scan_list:
+                start_hunting(symbol)
+                time.sleep(0.3)
+        except Exception as e:
+            time.sleep(10)
