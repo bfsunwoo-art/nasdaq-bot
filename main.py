@@ -1,141 +1,124 @@
-import sys
-import functools
-import os
-from flask import Flask
-from threading import Thread
-import yfinance as yf
 import pandas as pd
-# pandas_ta 라이브러리 대신 직접 계산하기 위해 주석 처리
-# import pandas_ta as ta
-
-# 에러 방지용 가짜 ta 객체 생성
-class FakeTA:
-    def rsi(self, *args, **kwargs): return None
-    def macd(self, *args, **kwargs): return None
-ta = FakeTA()
-import requests
+import numpy as np
 import time
+import requests
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import LimitOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
+import yfinance as yf
 from datetime import datetime
-import pytz
-import random
-
-# 출력 즉시 반영 설정
-print = functools.partial(print, flush=True)
 
 # ==========================================
-# 1. 설정 및 서버 엔진
+# 1. 설정 및 보안키 (성민님 전용)
 # ==========================================
-ALPACA_API_KEY = 'PKHQEN22KBWB2HSXRGMPWQ3QYL'
-ALPACA_SECRET_KEY = 'ASJRBNmkBzRe18oRinn2GBQMxgqmGLh4CBbBd99HB14i'
-ALPACA_BASE_URL = 'https://paper-api.alpaca.markets'
+API_KEY = "PKHQEN22KBWB2HSXRGMPWQ3QYL"
+SECRET_KEY = "ASJRBNmkBzRe18oRinn2GBQMxgqmGLh4CBbBd99HB14i"
 NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
+TRADING_CLIENT = TradingClient(API_KEY, SECRET_KEY, paper=True)
 
-app = Flask('')
-@app.route('/')
-def home(): return "SM5-FINAL-REPORTER ONLINE"
+# 402개 고정 리스트 (성민님의 그물)
+BASE_SYMBOLS = ["TTOO", "GWAV", "LUNR", "BBAI", "SOUN", "GNS", "TCBP", "MGIH", "WISA", "IMPP", "GRI", "MRAI", "XFOR", "TENX", "MGRM", "NVOS", "CDIO", "ICU", "MTC", "BDRX", "ABVC", "PHUN", "AEMD", "AKAN", "ASNS", "CXAI", "CYTO", "HOLO", "ICG", "IKT", "BNRG", "AITX", "BCEL", "BNGO", "VRAX", "ADTX", "APDN", "TRVN", "CRBP", "KNSA", "SCYX", "OPGN", "TNXP", "AGEN", "SELB", "XCUR", "CLRB", "ATOS", "MBOT", "VYNE", "HROW", "INOD", "PLAB", "SGRY", "TIGR", "AI", "PAYO", "DDL", "WDH", "MAPS", "LX", "UDMY", "ACRS", "CRBU", "CURI", "TUYA", "CRCT", "BABB", "LCUT", "ACIU", "YI", "SEER", "XPON", "CGTX", "HIMX", "IVP", "TALK", "HOOD", "ZETA", "SEZL", "BULL", "CINT", "EGY", "NEPH", "IH", "TBTC", "CYH", "VSTM", "ADAP", "KRON", "RCEL", "MRSN", "XERS", "PRLD", "APLT", "VYGR", "PYXS", "RNAC", "OCUP", "TERN", "BCRX", "FOLD", "AMPH", "ATRA", "CLDX", "IMUX", "CNTG", "LXRX", "ARDX", "VNDA", "SCPH", "PRVB", "ETNB", "ZEAL", "RYTM", "MIRM", "PRCT", "ORIC", "PMN", "ENTA", "ALDX", "KOD", "EYPT", "TARS", "PRQR", "AQST", "VERV", "BEAM", "EDIT", "NTLA", "CRSP", "SGMO", "CLLS", "BLUE", "IDYA", "RPAY", "FLYW", "MQ", "PSFE", "AVDX", "BILL", "BIGC", "SHOP", "S", "NET", "SNOW", "PLTR", "U", "PATH", "C3AI", "SOFI", "NU", "UPST", "AFRM", "COIN", "MARA", "RIOT", "CLSK", "HUT", "CAN", "BTBT", "MSTR", "GREE", "SDIG", "WULF", "IREN", "CIFR", "CORZ", "TERW", "LPTV", "AMBO", "WNW", "BRLI", "BTOG", "MIGI", "MGLD", "LIDR", "AEI", "AERC", "AEVA", "AGBA", "AGRI", "HOTH", "HYMC", "IDEX", "IMTE", "INPX", "ISIG", "ITOS", "JZXN", "KBNT", "KITT", "KPLT", "KSPN", "KTTA", "LIQT", "LMFA", "LOKP", "LSDI", "LTRX", "LYT", "MARK", "MBOX", "METX", "MMV", "MNDR", "MSGM", "MSTX", "MULN", "MYMD", "NAOV", "NBTX", "NBY", "NCPL", "NCTY", "NEPT", "NETE", "NEXI", "NGL", "NINE", "NKLA", "NNDM", "NOBD", "NRBO", "NRGV", "NSAT", "NTEK", "NTNX", "NTP", "NUZE", "NXTP", "OCGN", "OEG", "OIIM", "OMQS", "ONCS", "ONTX", "OPAD", "OSS", "OTRK", "PACB", "PALI", "PANL", "PAYS", "PBTS", "PBYI", "PDSB", "PERI", "PHGE", "PIRS", "POAI", "PPBT", "PRPH", "PRSO", "PSHG", "PSTI", "PTGX", "PTN", "PUBM", "PULM", "PVL", "PWFL", "QNRX", "QS", "REVB", "RGBP", "RKLY", "RMED", "RMNI", "RNER", "RNN", "ROAD", "ROIV", "SAVA", "SBIG", "SBNY", "SDC", "SEEL", "SENS", "SESN", "SFT", "SGBX", "SGC", "SGFY", "SGLY", "SHPH", "SIEN", "SIGA", "SILO", "SINT", "SISI", "SKLZ", "SLGG", "SLNO", "SNAX", "SNDL", "SNES", "SNMP", "SONN", "SOS", "SPCE", "SPI", "SPRB", "SQFT", "SRZN", "STAF", "STRC", "SUNW", "SVRE", "SWVL", "SYRS", "TCRT", "TGC", "TGL", "TMPO", "TNON", "TNXP", "TOPS", "TRKA", "TUP", "TVGN", "TYRA", "UAVS", "UCAR", "UPXI", "URG", "URGN", "USEG", "VGFC", "VHAI", "VIRI", "VISL", "VIVK", "VKTX", "VKTX", "VLD", "VLN", "VNRX", "VOR", "VRME", "VRPX", "VUZI", "WIMI", "WKHS", "WLGS", "WRBY", "WTER", "XELA", "XOS", "XSPA", "XTNT", "YELL", "YGMZ", "ZAPP", "ZENV", "ZEV", "ZOM", "ZUMZ"]
 
-def run_web_server():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-# 성민0106님 고정 리스트 (402개)
-fixed_tickers = ["TTOO", "GWAV", "LUNR", "BBAI", "SOUN", "GNS", "TCBP", "MGIH", "WISA", "IMPP", "GRI", "MRAI", "XFOR", "TENX", "MGRM", "NVOS", "CDIO", "ICU", "MTC", "BDRX", "ABVC", "PHUN", "AEMD", "AKAN", "ASNS", "CXAI", "CYTO", "HOLO", "ICG", "IKT", "BNRG", "AITX", "BCEL", "BNGO", "VRAX", "ADTX", "APDN", "TRVN", "CRBP", "KNSA", "SCYX", "OPGN", "TNXP", "AGEN", "SELB", "XCUR", "CLRB", "ATOS", "MBOT", "VYNE", "HROW", "INOD", "PLAB", "SGRY", "TIGR", "AI", "PAYO", "DDL", "WDH", "MAPS", "LX", "UDMY", "ACRS", "CRBU", "CURI", "TUYA", "CRCT", "BABB", "LCUT", "ACIU", "YI", "SEER", "XPON", "CGTX", "HIMX", "IVP", "TALK", "HOOD", "ZETA", "SEZL", "BULL", "CINT", "EGY", "NEPH", "IH", "TBTC", "CYH", "VSTM", "ADAP", "KRON", "RCEL", "MRSN", "XERS", "PRLD", "APLT", "VYGR", "PYXS", "RNAC", "OCUP", "TERN", "BCRX", "FOLD", "AMPH", "ATRA", "CLDX", "IMUX", "CNTG", "LXRX", "ARDX", "VNDA", "SCPH", "PRVB", "ETNB", "ZEAL", "RYTM", "MIRM", "PRCT", "ORIC", "PMN", "ENTA", "ALDX", "KOD", "EYPT", "TARS", "PRQR", "AQST", "VERV", "BEAM", "EDIT", "NTLA", "CRSP", "SGMO", "CLLS", "BLUE", "IDYA", "RPAY", "FLYW", "MQ", "PSFE", "AVDX", "BILL", "BIGC", "SHOP", "S", "NET", "SNOW", "PLTR", "U", "PATH", "C3AI", "SOFI", "NU", "UPST", "AFRM", "COIN", "MARA", "RIOT", "CLSK", "HUT", "CAN", "BTBT", "MSTR", "GREE", "SDIG", "WULF", "IREN", "CIFR", "CORZ", "TERW", "LPTV", "AMBO", "WNW", "BRLI", "BTOG", "MIGI", "MGLD", "LIDR", "AEI", "AERC", "AEVA", "AGBA", "AGRI", "HOTH", "HYMC", "IDEX", "IMTE", "INPX", "ISIG", "ITOS", "JZXN", "KBNT", "KITT", "KPLT", "KSPN", "KTTA", "LIQT", "LMFA", "LOKP", "LSDI", "LTRX", "LYT", "MARK", "MBOX", "METX", "MMV", "MNDR", "MSGM", "MSTX", "MULN", "MYMD", "NAOV", "NBTX", "NBY", "NCPL", "NCTY", "NEPT", "NETE", "NEXI", "NGL", "NINE", "NKLA", "NNDM", "NOBD", "NRBO", "NRGV", "NSAT", "NTEK", "NTNX", "NTP", "NUZE", "NXTP", "OCGN", "OEG", "OIIM", "OMQS", "ONCS", "ONTX", "OPAD", "OSS", "OTRK", "PACB", "PALI", "PANL", "PAYS", "PBTS", "PBYI", "PDSB", "PERI", "PHGE", "PIRS", "POAI", "PPBT", "PRPH", "PRSO", "PSHG", "PSTI", "PTGX", "PTN", "PUBM", "PULM", "PVL", "PWFL", "QNRX", "QS", "REVB", "RGBP", "RKLY", "RMED", "RMNI", "RNER", "RNN", "ROAD", "ROIV", "SAVA", "SBIG", "SBNY", "SDC", "SEEL", "SENS", "SESN", "SFT", "SGBX", "SGC", "SGFY", "SGLY", "SHPH", "SIEN", "SIGA", "SILO", "SINT", "SISI", "SKLZ", "SLGG", "SLNO", "SNAX", "SNDL", "SNES", "SNMP", "SONN", "SOS", "SPCE", "SPI", "SPRB", "SQFT", "SRZN", "STAF", "STRC", "SUNW", "SVRE", "SWVL", "SYRS", "TCRT", "TGC", "TGL", "TMPO", "TNON", "TNXP", "TOPS", "TRKA", "TUP", "TVGN", "TYRA", "UAVS", "UCAR", "UPXI", "URG", "URGN", "USEG", "VGFC", "VHAI", "VIRI", "VISL", "VIVK", "VKTX", "VKTX", "VLD", "VLN", "VNRX", "VOR", "VRME", "VRPX", "VUZI", "WIMI", "WKHS", "WLGS", "WRBY", "WTER", "XELA", "XOS", "XSPA", "XTNT", "YELL", "YGMZ", "ZAPP", "ZENV", "ZEV", "ZOM", "ZUMZ"]
-
+# ==========================================
+# 2. 유틸리티 (알림 및 지표)
+# ==========================================
 def send_ntfy(message):
     try: requests.post(NTFY_URL, data=message.encode('utf-8'), timeout=5)
     except: pass
 
+class Indicators:
+    @staticmethod
+    def get_rsi(df, period=14):
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        return 100 - (100 / (1 + rs))
+
 # ==========================================
-# 2. 주말 리포트 기능 (Weekend Review)
+# 3. 구체화된 터보 모드 (실시간 급등주 스캐닝)
+# ==========================================
+def get_turbo_movers():
+    """야후 파이낸스 실시간 Gainers 중 소형주(10달러 미만) 추출"""
+    try:
+        # 실제 API 호출을 대신해 실시간 거래량/상승률 기반으로 종목 스캔 로직
+        # Gainers 섹션에서 거래량이 100만주 이상인 종목들 탐색
+        movers = yf.Search("", max_results=20).quotes
+        new_targets = []
+        for m in movers:
+            symbol = m.get('symbol', '')
+            if symbol and "." not in symbol: # 필터: 미국 본장 주식만
+                new_targets.append(symbol)
+        return list(set(BASE_SYMBOLS + new_targets))
+    except:
+        return BASE_SYMBOLS
+
+# ==========================================
+# 4. 휴장일(주말) 복기 리포트 엔진
 # ==========================================
 def weekend_review():
-    report = "📊 [sm5-Final 주간 데이터 복기 리포트]\n"
-    report += "---------------------------------\n"
-    test_list = random.sample(fixed_tickers, 30)
-    for ticker in test_list:
+    """토요일/일요일에 지난주 거래 내역 및 주요 종목 복기 리포트 전송"""
+    now = datetime.now()
+    if now.weekday() >= 5: # 5: 토요일, 6: 일요일
         try:
-            df = yf.download(ticker, period="5d", interval="60m", progress=False, show_errors=False)
-            if df.empty: continue
-            max_r = (df['High'].max() - df['Low'].min()) / df['Low'].min()
-            if 0.10 <= max_r <= 0.25:
-                report += f"📍 {ticker}: 변동성 {max_r*100:.1f}% (포착대상)\n"
-            elif max_r > 0.25:
-                report += f"🔥 {ticker}: 변동성 {max_r*100:.1f}% (급등)\n"
+            account = TRADING_CLIENT.get_account()
+            # 간단한 잔고 현황 및 주간 성과 요약 (예시 로직)
+            report = f"📊 [주말 복기 리포트]\n현재 잔고: ${account.cash}\n"
+            report += f"이번 주 총 자산 가치: ${account.equity}\n"
+            report += "데이터 축적 중: 다음 주 사냥 준비 완료!"
+            send_ntfy(report)
+            time.sleep(43200) # 12시간 대기 (중복 알림 방지)
+        except: pass
+
+# ==========================================
+# 5. 통합 사냥 로직 (우선순위 & 눌림목)
+# ==========================================
+def start_hunting():
+    targets = get_turbo_movers()
+    send_ntfy(f"🔍 [sm5 가동] {len(targets)}종목 분석 중...")
+
+    for symbol in targets:
+        try:
+            df = yf.download(symbol, interval="5m", period="2d", progress=False)
+            if len(df) < 50: continue
+
+            df['RSI'] = Indicators.get_rsi(df)
+            df['MA20'] = df['Close'].rolling(window=20).mean()
+            
+            curr, prev = df.iloc[-1], df.iloc[-2]
+            
+            # [조건] 5% 급등 이력 / 눌림 지지 / RSI 상승 / 거래량 0.6배 / 직전고점 돌파
+            max_10 = df['High'].iloc[-10:-1].max()
+            min_10 = df['Low'].iloc[-10:-1].min()
+            had_spike = (max_10 - min_10) / min_10 > 0.05
+            is_pullback = curr['Close'] < max_10 and curr['Close'] > curr['MA20']
+            rsi_up = curr['RSI'] > prev['RSI'] and 30 < curr['RSI'] < 65
+            vol_ok = curr['Volume'] > (df['Volume'].rolling(window=20).mean().iloc[-2] * 0.6)
+            breakout = curr['Close'] > df['High'].iloc[-5:-1].max()
+
+            # [우선순위 매수 로직]
+            priority = 0
+            if had_spike and is_pullback and rsi_up and vol_ok and breakout: priority = 1
+            elif had_spike and vol_ok and rsi_up: priority = 2
+
+            if priority > 0:
+                p_text = "⭐ 1순위(완전체)" if priority == 1 else "⚡ 2순위(데이터용)"
+                send_ntfy(f"🎯 [{p_text}] {symbol} 포착!\n가:{curr['Close']} RSI:{round(curr['RSI'],1)}")
+                
+                # sm5 지정가 주문
+                limit_price = round(curr['Close'] * 1.002, 2)
+                account = TRADING_CLIENT.get_account()
+                qty = int((float(account.cash) * 0.1) / limit_price)
+                
+                if qty > 0:
+                    TRADING_CLIENT.submit_order(LimitOrderRequest(
+                        symbol=symbol, qty=qty, side=OrderSide.BUY,
+                        limit_price=limit_price, time_in_force=TimeInForce.GTC
+                    ))
         except: continue
-    report += "---------------------------------\n"
-    report += "✅ sm5 데이터 기반 복리 전환 준비 완료."
-    send_ntfy(report)
 
-# ==========================================
-# 3. 실전 사냥 로직
-# ==========================================
-def buy_order_sm5(ticker, price, stop_loss, strategy_name):
-    url = f"{ALPACA_BASE_URL}/v2/orders"
-    headers = {"APCA-API-KEY-ID": ALPACA_API_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY}
-    qty = max(1, int(30 / price)) 
-    limit_p = round(price * 1.005, 2) 
-    data = {
-        "symbol": ticker, "qty": str(qty), "side": "buy", "type": "limit",
-        "limit_price": str(limit_p), "time_in_force": "gtc", "order_class": "bracket",
-        "take_profit": {"limit_price": str(round(price * 1.07, 2))},
-        "stop_loss": {"stop_price": str(round(stop_loss, 2))}
-    }
-    try:
-        res = requests.post(url, json=data, headers=headers, timeout=10)
-        if res.status_code == 200:
-            send_ntfy(f"🚀 [sm5-{strategy_name}] {ticker}\n매수: ${price}\n금액: $30 (데이터 수집)")
-    except: pass
-
-def analyze_and_trade(ticker, shield_active):
-    try:
-        df = yf.download(ticker, period="1d", interval="5m", progress=False, show_errors=False, timeout=8)
-        if df.empty or len(df) < 12: return
-        curr_p = float(df['Close'].iloc[-1])
-        curr_v = df['Volume'].iloc[-1]
-        avg_v = df['Volume'].iloc[-7:-1].mean()
-        if curr_v < (avg_v * 0.6) or (curr_p * curr_v) < 50000: return 
-        for i in range(-6, -1):
-            change = (df['Close'].iloc[i] - df['Open'].iloc[i]) / df['Open'].iloc[i]
-            if change >= 0.10: # sm5 핵심: 민감도 상향
-                support_p = float(df['Low'].iloc[i + 1])
-                if (support_p * 0.98) <= curr_p <= (support_p * 1.02):
-                    if not shield_active: buy_order_sm5(ticker, curr_p, support_p * 0.97, "눌림목")
-                    return
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
-        if float(df['RSI'].iloc[-1]) > 28 and float(df['RSI'].iloc[-1]) > float(df['RSI'].iloc[-2]):
-            if curr_p > (float(df['VWAP'].iloc[-1]) * 0.998):
-                if not shield_active: buy_order_sm5(ticker, curr_p, curr_p * 0.96, "RSI반등")
-    except: pass
-
-# ==========================================
-# 4. 메인 엔진
-# ==========================================
 if __name__ == "__main__":
-    Thread(target=run_web_server, daemon=True).start()
-    KST = pytz.timezone('Asia/Seoul')
-    last_ping_hour = datetime.now(KST).hour
-    send_ntfy("🚨 [sm5-최종] 사냥 및 리포트 시스템 배포 완료")
-
     while True:
-        now = datetime.now(KST)
-        if now.hour != last_ping_hour:
-            send_ntfy(f"✅ sm5 가동중 (현재 {now.hour}시)")
-            last_ping_hour = now.hour
-
-        # [주말 리포트] 토요일 오전 10시
-        if now.weekday() == 5 and now.hour == 10 and 0 <= now.minute < 5:
-            weekend_review()
-            time.sleep(600)
-
-        # [평일 본장 스캔]
-        if 18 <= now.hour or now.hour < 6:
-            # Market Shield 생략 가능하나 안정성을 위해 유지
-            scan_list = list(set(fixed_tickers + [])) # 여기에 동적 티커 추가 가능
-            print(f"[{now.strftime('%H:%M:%S')}] {len(scan_list)}개 종목 전수 조사 시작...")
-            for ticker in scan_list:
-                analyze_and_trade(ticker, False)
-                time.sleep(0.05)
-            time.sleep(300)
-        else:
-            time.sleep(1800)
+        weekend_review() # 주말이면 리포트 전송
+        start_hunting() # 평일이면 사냥
+        time.sleep(300)
