@@ -1,5 +1,7 @@
 pandas
 pandas_ta
 requests
-pybit
+alpaca-trade-api
 flask
+pybit
+gunicorn
