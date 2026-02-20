@@ -11,10 +11,10 @@ import threading
 import sys
 
 # [1] 보안 및 환경 설정
-API_KEY = os.getenv("ALPACA_API_KEY", "PKHQEN22KBWB2HSXRGMPWQ3QYL")
-API_SECRET = os.getenv("ALPACA_API_SECRET", "ASJRBNmkBzRe18oRinn2GBQMxgqmGLh4CBbBd99HB14i")
+API_KEY = os.getenv("ALPACA_API_KEY")
+API_SECRET = os.getenv("ALPACA_API_SECRET")
 BASE_URL = "https://paper-api.alpaca.markets"
-NTFY_URL = "https://ntfy.sh/sungmin_ssk_7"
+NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh/sungmin_ssk_7")
 
 # 생존 로직: 터미널 로그 무력화 및 Clean 환경 유지
 sys.stderr = open(os.devnull, 'w')
