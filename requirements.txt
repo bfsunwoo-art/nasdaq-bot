@@ -1,8 +1,9 @@
-# Python 3.12.1 최적화 버전
+# Python 3.12.1 호환용 최적화 설정
 setuptools
 pandas==2.2.2
-numpy<2.0.0
-pandas_ta==0.3.14b0
+numpy>=1.26.0,<2.0.0
+# 버전을 명시하지 않아야 3.12용 호환 패키지를 자동으로 찾습니다
+pandas_ta
 requests==2.31.0
 alpaca-trade-api==3.1.1
 pybit==5.8.0
