@@ -218,7 +218,7 @@ if __name__ == "__main__":
         threading.Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000))), daemon=True).start()
         threading.Thread(target=report_system, daemon=True).start()
         
-        send_ntfy("🚀 sm5-위대한 항로 가동\n[소형주 402개 스캔 및 방어막 활성화]")
+        send_ntfy("🚀 sm7-위대한 항로 가동\n[소형주 402개 스캔 및 방어막 활성화]")
         
         while True:
             try:
