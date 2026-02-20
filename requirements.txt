@@ -1,9 +1,8 @@
-# 충돌 방지를 위한 정밀 버전 설정
 setuptools
 pandas==2.2.2
 numpy>=1.26.0,<2.0.0
-# numpy 1.x대와 호환되는 마지막 안정 버전을 명시합니다
-pandas-ta==0.3.14b0
+# GitHub 주소를 직접 지정하여 Python 3.12의 버전 탐색 오류를 우회합니다.
+pandas-ta @ git+https://github.com/twopirllc/pandas-ta.git@development
 requests==2.31.0
 alpaca-trade-api==3.1.1
 pybit==5.8.0
