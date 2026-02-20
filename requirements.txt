@@ -1,8 +1,8 @@
 setuptools
 pandas==2.2.2
 numpy>=1.26.0,<2.0.0
-# GitHub 주소를 직접 지정하여 Python 3.12의 버전 탐색 오류를 우회합니다.
-pandas-ta @ git+https://github.com/twopirllc/pandas-ta.git@development
+# 3.12에서 에러를 일으키는 numba를 제외하고 핵심 기능만 설치하도록 유도
+pandas-ta==0.4.71b0
 requests==2.31.0
 alpaca-trade-api==3.1.1
 pybit==5.8.0
