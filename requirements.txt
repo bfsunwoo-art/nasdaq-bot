@@ -1,11 +1,9 @@
 setuptools
-pandas==2.2.2
-numpy>=1.26.0,<2.0.0
-# 3.12에서 에러를 일으키는 numba를 제외하고 핵심 기능만 설치하도록 유도
-pandas-ta==0.4.71b0
-requests==2.31.0
-alpaca-trade-api==3.1.1
-pybit==5.8.0
-Flask==3.0.3
-gunicorn==22.0.0
-pytz==2024.1
+pandas
+pandas-ta
+requests
+alpaca-trade-api
+pybit
+Flask
+gunicorn
+pytz
