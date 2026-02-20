@@ -17,7 +17,7 @@ BASE_URL = "https://paper-api.alpaca.markets"
 NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh/sungmin_ssk_7")
 
 # 생존 로직: 터미널 로그 무력화 및 Clean 환경 유지
-sys.stderr = open(os.devnull, 'w')
+# sys.stderr = open(os.devnull, 'w')
 api = tradeapi.REST(API_KEY, API_SECRET, BASE_URL, api_version='v2')
 
 reject_log = []
