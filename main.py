@@ -34,14 +34,14 @@ def log(msg):
 def auth_test():
     try:
         api.get_account()
-        msg = "✅ [인증] API 성공 | sm7 무한사냥 통합 가동"
+        msg = "✅ [인증] API 성공 | sm7 무한사냥 V3 (사냥꾼의 감각) 가동"
         log(msg); send_ntfy(msg)
         return True
     except Exception as e:
         send_ntfy(f"❌ [경고] API 인증 실패: {e}"); return False
 
 # ==========================================
-# 2. 리포트 및 휴식 로직 (빠졌던 기능 복구)
+# 2. 리포트 및 휴식 로직 (유지)
 # ==========================================
 def report_system():
     log("📊 리포트 스케줄러 가동")
@@ -65,29 +65,59 @@ def report_system():
         time.sleep(30)
 
 # ==========================================
-# 3. 매매 전략 로직 (성민님 기존 로직 100%)
+# 3. 매매 전략 로직 및 리스크 관리
 # ==========================================
-def smart_buy(symbol, priority, tag, detect_price, is_extended):
+def get_market_status():
+    now_kst = datetime.now(KST)
+    try: clock = api.get_clock()
+    except: return "ERROR", False
+    if now_kst.hour == 18 and 0 <= now_kst.minute < 20: return "PRE_SHIELD", False
+    if (now_kst.hour == 23 and now_kst.minute >= 30) or (now_kst.hour == 0 and now_kst.minute < 1): return "REG_SHIELD", False
+    if 8 <= now_kst.hour < 18: return "REST", False
+    return ("REGULAR" if clock.is_open else "EXTENDED"), True
+
+def check_buying_power_limit(priority):
+    """ (70% 룰) P2를 위한 현금 30% 상시 확보 """
+    try:
+        acc = api.get_account()
+        equity, cash = float(acc.equity), float(acc.non_marginable_buying_power)
+        usage_ratio = (equity - cash) / equity
+        
+        # 총 자산 대비 매수 비중이 70% 초과 시 P3, P4, P5 진입 차단 (P1, P2만 허용)
+        if usage_ratio > 0.70 and priority >= 3:
+            reject_log.append(f"{datetime.now(KST).strftime('%H:%M')} BP부족(70%룰 차단-P{priority})")
+            return False
+        return True
+    except: return False
+
+def smart_buy(symbol, priority, tag, detect_price, is_extended, budget):
+    """ 설거지 방지 및 IOC 기반 스마트 체결 """
     try:
         if not check_buying_power_limit(priority): return
         current_snap = api.get_snapshot(symbol)
         realtime_price = current_snap.latest_trade.p
+        
+        # [Anti-Dump] 포착가 대비 실제 주문 시점 가격이 2% 이상 높으면 추격 매수 포기
         if realtime_price > detect_price * 1.02:
-            log(f"🚫 {symbol} 설거지 방지 작동")
+            log(f"🚫 {symbol} 고점 설거지 방지 작동 (포착:{detect_price} / 현재:{realtime_price})")
             return
+            
         limit_price = round(realtime_price * 1.01, 2)
-        budget = 150 if priority == 1 else (100 if priority == 2 else 50)
         qty = int(budget // limit_price)
         if qty <= 0: return
+        
         def place_order():
+            # 모든 장 지정가 + IOC (미체결 잔량 즉시 취소)
             order = api.submit_order(symbol=symbol, qty=qty, side='buy', type='limit',
                 limit_price=limit_price, time_in_force='ioc', extended_hours=is_extended)
             time.sleep(2.0)
             return api.get_order(order.id)
+            
         order_info = place_order()
-        if order_info.status != 'filled':
-            log(f"⚠️ {symbol} 재시도...")
+        if order_info.status != 'filled': # 1회 한정 재시도 (주문 꼬임 방지)
+            log(f"⚠️ {symbol} IOC 미체결, 1회 재시도...")
             order_info = place_order()
+            
         if order_info.status == 'filled':
             send_ntfy(f"🎯 {tag} 체결: {symbol}\n단가: ${order_info.filled_avg_price}\n설거지방지: 통과")
             active_positions[symbol] = {
@@ -108,56 +138,85 @@ def exit_trade(symbol, qty, profit, reason, is_extended):
         if symbol in active_positions: del active_positions[symbol]
     except: pass
 
-def get_market_status():
-    now_kst = datetime.now(KST)
-    try: clock = api.get_clock()
-    except: return "ERROR", False
-    if now_kst.hour == 18 and 0 <= now_kst.minute < 20: return "PRE_SHIELD", False
-    if (now_kst.hour == 23 and now_kst.minute >= 30) or (now_kst.hour == 0 and now_kst.minute < 1): return "REG_SHIELD", False
-    if 8 <= now_kst.hour < 18: return "REST", False
-    return ("REGULAR" if clock.is_open else "EXTENDED"), True
-
-def check_buying_power_limit(priority):
-    try:
-        acc = api.get_account()
-        equity, cash = float(acc.equity), float(acc.non_marginable_buying_power)
-        if (equity - cash) / equity > 0.70 and priority >= 3:
-            reject_log.append(f"{datetime.now(KST).strftime('%H:%M')} BP부족(P{priority})")
-            return False
-        return True
-    except: return False
-
-def analyze_and_trade(symbol, curr_price, is_extended):
+def analyze_and_trade(symbol, curr_price, prev_close, snap, is_extended):
+    # [출구 전략 (Exit Logic)]
     if symbol in active_positions:
         pos = active_positions[symbol]
         pos['highest_price'] = max(pos.get('highest_price', curr_price), curr_price)
         profit = (curr_price - pos['entry_price']) / pos['entry_price']
         drop_from_top = (pos['highest_price'] - curr_price) / pos['highest_price']
         elapsed = time.time() - pos['entry_ts']
-        if profit <= -0.045: exit_trade(symbol, pos['qty'], profit, "손절(-4.5%)", is_extended)
-        elif profit > 0.01 and drop_from_top >= 0.03: exit_trade(symbol, pos['qty'], profit, "추격익절", is_extended)
-        elif elapsed > 1800 and profit < 0.005: exit_trade(symbol, pos['qty'], profit, "타임컷", is_extended)
+        
+        if profit <= -0.045: exit_trade(symbol, pos['qty'], profit, "본절 손절(-4.5%)", is_extended)
+        elif profit > 0.01 and drop_from_top >= 0.03: exit_trade(symbol, pos['qty'], profit, "추격 익절(Trailing)", is_extended)
+        elif elapsed > 1800 and profit < 0.005: exit_trade(symbol, pos['qty'], profit, "타임컷(30분 경과)", is_extended)
         return
+        
+    # [사냥꾼의 감각 진입 전략 (Entry Logic)]
     try:
-        bars = api.get_bars(symbol, tradeapi.TimeFrame.Minute * 5, limit=30).df
+        # P1, P4, P5 조건 확인을 위해 1분봉 데이터 60개 호출 (정밀도 상승)
+        bars = api.get_bars(symbol, tradeapi.TimeFrame.Minute, limit=60).df
         if bars is None or bars.empty or len(bars) < 20: return
         df = bars.copy()
-        df['RSI'] = ta.rsi(df['close'], length=14); df['VWAP'] = ta.vwap(df['high'], df['low'], df['close'], df['volume'])
-        curr, prev = df.iloc[-1], df.iloc[-2]
-        vol_avg = max(df['volume'].rolling(window=20).mean().iloc[-2], 1)
-        if is_extended: vol_avg *= 0.3
-        priority = 0; tag = ""
-        if curr['close'] > df['high'].iloc[-15:-1].max() and curr['RSI'] > prev['RSI'] and curr['close'] > prev['close'] * 1.05:
-            priority = 1; tag = "[P1-Strict]"
-        elif curr['volume'] > (vol_avg * 0.6) and curr['RSI'] > prev['RSI'] and curr['close'] > prev['close'] * 1.05:
-            priority = 2; tag = "[P2-Mid]"
-        elif curr['close'] > df['high'].iloc[:5].max() and curr['volume'] > vol_avg * 1.1:
-            priority = 3; tag = "[P3-ORB]"
-        elif curr['close'] > (curr['VWAP'] * 1.0075):
-            priority = 4; tag = "[P4-VWAP]"
-        elif curr['volume'] > (vol_avg * 2.0) and abs(curr['close'] - prev['close']) / prev['close'] < 0.01:
-            priority = 5; tag = "[P5-Squat]"
-        if priority > 0: smart_buy(symbol, priority, tag, curr_price, is_extended)
+        
+        # 보조지표 계산
+        df['RSI'] = ta.rsi(df['close'], length=14)
+        df['vol_avg_20'] = df['volume'].rolling(window=20).mean()
+        # 볼린저 밴드 계산 (기간 20)
+        df['SMA20'] = df['close'].rolling(window=20).mean()
+        df['STD20'] = df['close'].rolling(window=20).std()
+        df['BB_WIDTH'] = (4 * df['STD20']) / df['SMA20'] 
+
+        curr = df.iloc[-1]
+        prev1 = df.iloc[-2]
+        prev2 = df.iloc[-3]
+        
+        priority = 0; tag = ""; budget = 0
+        now_kst = datetime.now(KST)
+
+        # 공통 수급 데이터
+        today_vol = snap.daily_bar.v if snap.daily_bar else 0
+        prev_daily_vol = snap.prev_daily_bar.v if snap.prev_daily_bar else 1
+
+        # --- P2: 수급의 지배 (최우선 순위 판별) ---
+        is_premarket_time = (18 <= now_kst.hour <= 23)
+        if is_premarket_time and today_vol > (prev_daily_vol * 0.5):
+            priority = 2
+            tag = "[P2-수급지배]"
+            budget = 150 if now_kst.hour >= 23 else 100 # 본장 직전 집중 배팅
+            
+        # --- P1: 이성적 돌파 ---
+        elif (prev1['close'] > prev1['open']) and (curr['volume'] > curr['vol_avg_20'] * 1.5):
+            if 64 <= curr['RSI'] <= 70:
+                priority = 1; tag = "[P1-돌파(100%)]"; budget = 100
+            elif 70 < curr['RSI'] <= 77:
+                priority = 1; tag = "[P1-돌파(70%)]"; budget = 70
+
+        # --- P3: 광기의 눌림목 ---
+        elif curr_price > prev_close * 1.5: # 당일 50% 이상 폭등 확인
+            recent_low = df['low'].tail(20).min() # 최근 파동의 저가 근접
+            if curr_price <= recent_low * 1.02:
+                priority = 3; tag = "[P3-눌림목]"; budget = 50 # 고정 예산
+
+        # --- P4: 억눌림 ---
+        elif priority == 0:
+            range_10m = (df['high'].tail(10).max() - df['low'].tail(10).min()) / curr_price
+            is_bb_min = curr['BB_WIDTH'] <= df['BB_WIDTH'].tail(60).min() * 1.05 # 1시간 내 최소 수준
+            is_vol_surge = curr['volume'] > curr['vol_avg_20'] * 1.8
+            is_near_high = curr_price >= df['high'].tail(60).max() * 0.99
+            
+            if range_10m < 0.01 and is_bb_min and is_vol_surge and is_near_high:
+                priority = 4; tag = "[P4-억눌림]"; budget = 100
+
+        # --- P5: 포모 헌터 ---
+        elif curr['volume'] > prev1['volume'] > prev2['volume']:
+            nearest_rf = round(curr_price * 2) / 2 # 라운드 피겨 ($0.5, $1.0, $1.5 등)
+            if nearest_rf > 0 and abs(curr_price - nearest_rf) / nearest_rf <= 0.005:
+                priority = 5; tag = "[P5-포모]"; budget = 100
+                
+        # 조건 달성 시 매수 트리거
+        if priority > 0: 
+            smart_buy(symbol, priority, tag, curr_price, is_extended, budget)
     except: pass
 
 # ==========================================
@@ -168,7 +227,6 @@ BASE_SYMBOLS = ["ROLR", "BNAI", "RXT", "BATL", "TMDE", "INDO", "SVRN", "DFLI", "
 def main_trading_loop():
     time.sleep(15)
     if auth_test():
-        # 리포트 스케줄러 별도 스레드로 실행
         threading.Thread(target=report_system, daemon=True).start()
         while True:
             try:
@@ -193,11 +251,15 @@ def main_trading_loop():
                         snap = snaps[symbol]
                         curr_price = snap.latest_trade.p
                         prev_close = snap.prev_daily_bar.c if snap.prev_daily_bar else curr_price
+                        
                         if (curr_price / prev_close - 1) > 0.03 or symbol in active_positions:
-                            analyze_and_trade(symbol, curr_price, (status == "EXTENDED"))
-                    time.sleep(2.5) # CPU 및 포트 응답 대기
+                            # snap 데이터를 analyze_and_trade로 넘겨 P2 수급 계산에 활용
+                            analyze_and_trade(symbol, curr_price, prev_close, snap, (status == "EXTENDED"))
+                    
+                    # 🛡️ API Rate Limit 방지: 무료 티어 호출 제한을 피하기 위해 2.5초 -> 3.5초로 연장
+                    time.sleep(3.5)
             except Exception as e:
-                log(f"Loop Error: {e}"); time.sleep(20)
+                log(f"Loop 대기열 Error: {e}"); time.sleep(20)
 
 # ==========================================
 # 5. Flask 및 Gunicorn 통합 실행
@@ -208,9 +270,8 @@ app = Flask(__name__)
 def health():
     now = datetime.now(KST).strftime('%H:%M:%S')
     pos_list = list(active_positions.keys())
-    return f"<h3>sm7 V2.2 Full-Spec</h3>Time: {now}<br>Pos: {pos_list if pos_list else 'None'}<br>Status: Hunting", 200
+    return f"<h3>sm7 V3 Full-Spec (Hunter's Instinct)</h3>Time: {now}<br>Pos: {pos_list if pos_list else 'None'}<br>Status: Hunting", 200
 
-# Gunicorn 환경에서 봇 엔진을 안전하게 깨우는 장치
 @app.before_request
 def init_bot():
     if not any(t.name == "TradingEngine" for t in threading.enumerate()):
@@ -220,7 +281,6 @@ def init_bot():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    # 로컬 테스트용
     if not any(t.name == "TradingEngine" for t in threading.enumerate()):
         engine = threading.Thread(target=main_trading_loop, name="TradingEngine", daemon=True)
         engine.start()
