@@ -262,7 +262,7 @@ def main_trading_loop():
                 log(f"Loop 대기열 Error: {e}"); time.sleep(20)
 
 # ==========================================
-# 5. Flask 및 Gunicorn 통합 실행
+# 5. Flask 및 Gunicorn 통합 실행 (수정본)
 # ==========================================
 app = Flask(__name__)
 
@@ -272,16 +272,16 @@ def health():
     pos_list = list(active_positions.keys())
     return f"<h3>sm7 V3 Full-Spec (Hunter's Instinct)</h3>Time: {now}<br>Pos: {pos_list if pos_list else 'None'}<br>Status: Hunting", 200
 
-@app.before_request
-def init_bot():
-    if not any(t.name == "TradingEngine" for t in threading.enumerate()):
-        engine = threading.Thread(target=main_trading_loop, name="TradingEngine", daemon=True)
-        engine.start()
-        log("🚀 sm7 Full-Spec Engine Started!")
+# [중요] 기존 @app.before_request 구간을 완전히 삭제하거나 아래처럼 비워두세요.
+# 대신 엔진 시작 로직을 메인 실행부로 옮깁니다.
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    if not any(t.name == "TradingEngine" for t in threading.enumerate()):
-        engine = threading.Thread(target=main_trading_loop, name="TradingEngine", daemon=True)
-        engine.start()
+    
+    # 서버 실행과 동시에 트레이딩 엔진 강제 가동
+    log("🚀 [System] 강제 엔진 가동 시퀀스 시작...")
+    engine = threading.Thread(target=main_trading_loop, name="TradingEngine", daemon=True)
+    engine.start()
+    
+    # 웹 서버 실행
     app.run(host='0.0.0.0', port=port)
